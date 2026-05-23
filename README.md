@@ -65,8 +65,7 @@ chmod 600 .env
 Start it:
 
 ```sh
-systemctl --user daemon-reload
-systemctl --user enable --now spoiler-cleaner.service
+./scripts/start-service.sh
 systemctl --user status spoiler-cleaner.service
 ```
 
