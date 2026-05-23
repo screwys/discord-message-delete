@@ -53,23 +53,13 @@ go run ./cmd/spoilercleaner -config config.json
 
 ## Install As A User Service
 
-Build and install the binary:
+After `config.json` and `.env` exist in this repo, build the binary and install the service:
 
 ```sh
 go build -o spoiler-cleaner ./cmd/spoilercleaner
-mkdir -p ~/.local/bin ~/.local/share/spoiler-cleaner ~/.config/systemd/user
-cp spoiler-cleaner ~/.local/bin/spoiler-cleaner
-cp config.example.json ~/.local/share/spoiler-cleaner/config.json
-cp .env.example ~/.local/share/spoiler-cleaner/.env
+mkdir -p ~/.config/systemd/user
 cp spoiler-cleaner.service ~/.config/systemd/user/spoiler-cleaner.service
-```
-
-Edit the installed files:
-
-```sh
-$EDITOR ~/.local/share/spoiler-cleaner/config.json
-$EDITOR ~/.local/share/spoiler-cleaner/.env
-chmod 600 ~/.local/share/spoiler-cleaner/.env
+chmod 600 .env
 ```
 
 Start it:

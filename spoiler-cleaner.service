@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/.local/share/spoiler-cleaner
-ExecStart=%h/.local/bin/spoiler-cleaner -config config.json -env .env
+WorkingDirectory=%h/Projects/discord-message-delete
+ExecStart=%h/Projects/discord-message-delete/spoiler-cleaner -config config.json -env .env
 Restart=on-failure
 RestartSec=10
 
