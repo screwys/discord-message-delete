@@ -1,0 +1,17 @@
+{
+  "spoiler_image_user_id": "111111111111111111",
+  "ignored_user_ids": [
+    "222222222222222222"
+  ],
+  "message_regexes": [
+    {
+      "name": "blocked words",
+      "pattern": "(?i)\\b(?:example|placeholder)\\b"
+    },
+    {
+      "name": "discord invite links",
+      "pattern": "(?i)\\bdiscord\\.gg/[a-z0-9-]+\\b"
+    }
+  ]
+}
+
