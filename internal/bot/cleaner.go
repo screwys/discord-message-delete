@@ -5,6 +5,9 @@ import (
 	"mime"
 	"path/filepath"
 	"strings"
+	"unicode"
+
+	"github.com/mtibben/confusables"
 )
 
 type Cleaner struct {
@@ -66,8 +69,10 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 	}
 
 	searchText := messageSearchText(message)
+	foldedSearchText := foldConfusableText(searchText)
 	for _, rule := range cleaner.config.MessageRegexes {
-		if rule.Regex.MatchString(searchText) {
+		if rule.Regex.MatchString(searchText) ||
+			(foldedSearchText != searchText && rule.Regex.MatchString(foldedSearchText)) {
 			return Decision{Delete: true, Reason: fmt.Sprintf("message regex matched: %s", rule.Label())}
 		}
 	}
@@ -103,6 +108,39 @@ func messageSearchText(message Message) string {
 	}
 
 	return builder.String()
+}
+
+func foldConfusableText(value string) string {
+	needsFolding := false
+	for _, char := range value {
+		if char > unicode.MaxASCII || isDefaultIgnorable(char) {
+			needsFolding = true
+			break
+		}
+	}
+	if !needsFolding {
+		return value
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, char := range value {
+		if isDefaultIgnorable(char) {
+			continue
+		}
+		if char <= unicode.MaxASCII {
+			builder.WriteRune(char)
+			continue
+		}
+		builder.WriteString(confusables.Skeleton(string(char)))
+	}
+	return builder.String()
+}
+
+func isDefaultIgnorable(char rune) bool {
+	return unicode.Is(unicode.Cf, char) ||
+		unicode.Is(unicode.Variation_Selector, char) ||
+		unicode.Is(unicode.Other_Default_Ignorable_Code_Point, char)
 }
 
 func hasSpoileredImageAttachment(attachments []Attachment) bool {

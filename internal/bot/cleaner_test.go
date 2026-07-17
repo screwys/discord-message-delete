@@ -95,6 +95,28 @@ func TestMessageRegexesDeleteMatchingContent(t *testing.T) {
 	}
 }
 
+func TestMessageRegexesMatchUnicodeConfusables(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{
+		MessageRegexes: []RegexRuleConfig{{Name: "blocked term", Pattern: `(?i)\bsyntax\b`}},
+	})
+
+	decision := cleaner.Decide(Message{AuthorID: "member", Content: "ѕуntах"})
+	if !decision.Delete {
+		t.Fatal("Delete = false, want true")
+	}
+}
+
+func TestMessageRegexesIgnoreInvisibleFormatting(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{
+		MessageRegexes: []RegexRuleConfig{{Name: "blocked term", Pattern: `(?i)\bexample\b`}},
+	})
+
+	decision := cleaner.Decide(Message{AuthorID: "member", Content: "ex\u200bample"})
+	if !decision.Delete {
+		t.Fatal("Delete = false, want true")
+	}
+}
+
 func TestMessageRegexesDeleteMatchingEmbedMetadata(t *testing.T) {
 	cleaner := newTestCleaner(t, Config{
 		MessageRegexes: []RegexRuleConfig{{Name: "blocked social username", Pattern: `(?i)\bword_i_want_to_block\b`}},

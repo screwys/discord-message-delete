@@ -41,7 +41,7 @@ $EDITOR .env
 
 To get a Discord user ID, enable **User Settings > Advanced > Developer Mode**, then right-click the user and choose **Copy User ID**.
 
-Regex rules are matched against message content and embed metadata such as title, description, author, provider, footer, fields, and URLs. Use `(?i)` for case-insensitive matching.
+Regex rules are matched against message content and embed metadata such as title, description, author, provider, footer, fields, and URLs. Each rule is checked against both the original text and a Unicode confusable-folded copy, with invisible formatting characters removed from the folded copy. Use `(?i)` for case-insensitive matching.
 
 `config.json` and `.env` are ignored by Git so tokens and server-specific settings do not get pushed to a public repo.
 
