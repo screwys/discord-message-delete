@@ -23,6 +23,7 @@ type Attachment struct {
 	ContentType string
 	Width       int
 	Height      int
+	Spoiler     bool
 }
 
 type Embed struct {
@@ -106,7 +107,7 @@ func messageSearchText(message Message) string {
 
 func hasSpoileredImageAttachment(attachments []Attachment) bool {
 	for _, attachment := range attachments {
-		if isSpoilerFilename(attachment.Filename) && isImageAttachment(attachment) {
+		if (attachment.Spoiler || isSpoilerFilename(attachment.Filename)) && isImageAttachment(attachment) {
 			return true
 		}
 	}

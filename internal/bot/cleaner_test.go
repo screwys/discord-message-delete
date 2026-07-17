@@ -27,6 +27,14 @@ func TestDeletesSpoileredImagesOnlyForConfiguredUser(t *testing.T) {
 			delete: true,
 		},
 		{
+			name: "target user image marked with Discord spoiler flag",
+			message: Message{
+				AuthorID:    "target-user",
+				Attachments: []Attachment{{Filename: "photo.png", ContentType: "image/png", Spoiler: true}},
+			},
+			delete: true,
+		},
+		{
 			name: "different user spoilered image",
 			message: Message{
 				AuthorID:    "other-user",

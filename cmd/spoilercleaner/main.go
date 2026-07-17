@@ -22,6 +22,8 @@ type cleanerStore struct {
 	value atomic.Value
 }
 
+const discordAttachmentFlagSpoiler discordgo.MessageAttachmentFlags = 1 << 3
+
 func newCleanerStore(cleaner *bot.Cleaner) *cleanerStore {
 	store := &cleanerStore{}
 	store.value.Store(cleaner)
@@ -272,6 +274,7 @@ func attachmentsFromDiscord(attachments []*discordgo.MessageAttachment) []bot.At
 			ContentType: attachment.ContentType,
 			Width:       attachment.Width,
 			Height:      attachment.Height,
+			Spoiler:     attachment.Flags&discordAttachmentFlagSpoiler != 0,
 		})
 	}
 	return result
