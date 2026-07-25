@@ -15,10 +15,11 @@ type Cleaner struct {
 }
 
 type Message struct {
-	AuthorID    string
-	Content     string
-	Attachments []Attachment
-	Embeds      []Embed
+	AuthorID             string
+	Content              string
+	Attachments          []Attachment
+	Embeds               []Embed
+	SpoileredVisualMedia bool
 }
 
 type Attachment struct {
@@ -63,9 +64,10 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 		return Decision{}
 	}
 	if cleaner.config.SpoilerImageUserID != "" &&
-		message.AuthorID == cleaner.config.SpoilerImageUserID &&
-		hasSpoileredImageAttachment(message.Attachments) {
-		return Decision{Delete: true, Reason: "spoilered image from configured user"}
+		message.AuthorID == cleaner.config.SpoilerImageUserID {
+		if message.SpoileredVisualMedia || hasSpoileredImageAttachment(message.Attachments) {
+			return Decision{Delete: true, Reason: "spoilered image from configured user"}
+		}
 	}
 
 	searchText := messageSearchText(message)
@@ -168,6 +170,6 @@ func isImageAttachment(attachment Attachment) bool {
 	case ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp":
 		return true
 	default:
-		return false
+		return contentType == "" && attachment.Width > 0 && attachment.Height > 0
 	}
 }

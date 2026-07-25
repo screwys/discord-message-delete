@@ -35,6 +35,22 @@ func TestDeletesSpoileredImagesOnlyForConfiguredUser(t *testing.T) {
 			delete: true,
 		},
 		{
+			name: "target user flagged visual attachment without media metadata",
+			message: Message{
+				AuthorID:    "target-user",
+				Attachments: []Attachment{{Filename: "attachment", Width: 1280, Height: 720, Spoiler: true}},
+			},
+			delete: true,
+		},
+		{
+			name: "target user spoilered visual component",
+			message: Message{
+				AuthorID:             "target-user",
+				SpoileredVisualMedia: true,
+			},
+			delete: true,
+		},
+		{
 			name: "different user spoilered image",
 			message: Message{
 				AuthorID:    "other-user",

@@ -77,10 +77,10 @@ func main() {
 		logger.Printf("connected as %s", ready.User.String())
 	})
 	session.AddHandler(func(s *discordgo.Session, message *discordgo.MessageCreate) {
-		handleMessage(s, message.ID, message.ChannelID, message.Author, message.Content, message.Attachments, message.Embeds, me.ID, activeCleaner, logger)
+		handleMessage(s, message.Message, me.ID, activeCleaner, logger)
 	})
 	session.AddHandler(func(s *discordgo.Session, message *discordgo.MessageUpdate) {
-		handleMessage(s, message.ID, message.ChannelID, message.Author, message.Content, message.Attachments, message.Embeds, me.ID, activeCleaner, logger)
+		handleMessage(s, message.Message, me.ID, activeCleaner, logger)
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -145,17 +145,12 @@ func reloadConfigLoop(ctx context.Context, configPath string, interval time.Dura
 
 func handleMessage(
 	s *discordgo.Session,
-	messageID string,
-	channelID string,
-	author *discordgo.User,
-	content string,
-	attachments []*discordgo.MessageAttachment,
-	embeds []*discordgo.MessageEmbed,
+	message *discordgo.Message,
 	botUserID string,
 	activeCleaner *cleanerStore,
 	logger *log.Logger,
 ) {
-	if author == nil || author.ID == botUserID {
+	if message == nil || message.Author == nil || message.Author.ID == botUserID {
 		return
 	}
 
@@ -165,21 +160,77 @@ func handleMessage(
 		return
 	}
 
-	decision := cleaner.Decide(bot.Message{
-		AuthorID:    author.ID,
-		Content:     content,
-		Attachments: attachmentsFromDiscord(attachments),
-		Embeds:      embedsFromDiscord(embeds),
-	})
+	decision := cleaner.Decide(messageFromDiscord(message))
 	if !decision.Delete {
 		return
 	}
 
-	if err := s.ChannelMessageDelete(channelID, messageID); err != nil {
-		logger.Printf("delete failed channel=%s message=%s author=%s reason=%q error=%v", channelID, messageID, author.ID, decision.Reason, err)
+	if err := s.ChannelMessageDelete(message.ChannelID, message.ID); err != nil {
+		logger.Printf("delete failed channel=%s message=%s author=%s reason=%q error=%v", message.ChannelID, message.ID, message.Author.ID, decision.Reason, err)
 		return
 	}
-	logger.Printf("deleted channel=%s message=%s author=%s reason=%q", channelID, messageID, author.ID, decision.Reason)
+	logger.Printf("deleted channel=%s message=%s author=%s reason=%q", message.ChannelID, message.ID, message.Author.ID, decision.Reason)
+}
+
+func messageFromDiscord(message *discordgo.Message) bot.Message {
+	if message == nil {
+		return bot.Message{}
+	}
+
+	converted := bot.Message{
+		Content: message.Content,
+		Embeds:  embedsFromDiscord(message.Embeds),
+	}
+	if message.Author != nil {
+		converted.AuthorID = message.Author.ID
+	}
+	appendDiscordMedia(&converted, message)
+	return converted
+}
+
+func appendDiscordMedia(converted *bot.Message, message *discordgo.Message) {
+	converted.Attachments = append(converted.Attachments, attachmentsFromDiscord(message.Attachments)...)
+	if hasSpoileredVisualComponent(message.Components, false) {
+		converted.SpoileredVisualMedia = true
+	}
+	for _, snapshot := range message.MessageSnapshots {
+		if snapshot.Message != nil {
+			appendDiscordMedia(converted, snapshot.Message)
+		}
+	}
+}
+
+func hasSpoileredVisualComponent(components []discordgo.MessageComponent, inheritedSpoiler bool) bool {
+	for _, component := range components {
+		if isSpoileredVisualComponent(component, inheritedSpoiler) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSpoileredVisualComponent(component discordgo.MessageComponent, inheritedSpoiler bool) bool {
+	switch component := component.(type) {
+	case *discordgo.Thumbnail:
+		return inheritedSpoiler || component.Spoiler
+	case *discordgo.MediaGallery:
+		return mediaGalleryHasSpoiler(component.Items, inheritedSpoiler)
+	case *discordgo.Container:
+		return hasSpoileredVisualComponent(component.Components, inheritedSpoiler || component.Spoiler)
+	case *discordgo.Section:
+		return isSpoileredVisualComponent(component.Accessory, inheritedSpoiler)
+	default:
+		return false
+	}
+}
+
+func mediaGalleryHasSpoiler(items []discordgo.MediaGalleryItem, inheritedSpoiler bool) bool {
+	for _, item := range items {
+		if inheritedSpoiler || item.Spoiler {
+			return true
+		}
+	}
+	return false
 }
 
 func embedsFromDiscord(embeds []*discordgo.MessageEmbed) []bot.Embed {

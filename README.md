@@ -1,8 +1,8 @@
 # Spoiler Cleaner Discord Bot
 
-A small Go Discord bot that deletes messages from one configured user when they contain a spoilered image attachment, and deletes messages from non-ignored users when content or embed metadata matches configured regex rules.
+A small Go Discord bot that deletes messages from one configured user when they contain spoilered visual media, and deletes messages from non-ignored users when content or embed metadata matches configured regex rules.
 
-Discord marks spoilered attachments with its attachment spoiler flag. The bot also recognizes the older `SPOILER_` filename convention. It deletes the whole message because bots cannot remove a single attachment from another user's message.
+Discord can represent spoilered media through attachment flags, visual components, or forwarded-message snapshots. The bot also recognizes the older `SPOILER_` filename convention. It deletes the whole message because bots cannot remove a single attachment from another user's message.
 
 ## Discord Setup
 
