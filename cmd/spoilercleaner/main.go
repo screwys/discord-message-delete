@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -74,13 +75,13 @@ func main() {
 	}
 
 	session.AddHandler(func(_ *discordgo.Session, ready *discordgo.Ready) {
-		logger.Printf("connected as %s", ready.User.String())
+		logger.Print("connected")
 	})
 	session.AddHandler(func(s *discordgo.Session, message *discordgo.MessageCreate) {
-		handleMessage(s, message.Message, me.ID, activeCleaner, logger)
+		handleMessage(s, message.Message, "create", me.ID, activeCleaner, logger)
 	})
 	session.AddHandler(func(s *discordgo.Session, message *discordgo.MessageUpdate) {
-		handleMessage(s, message.Message, me.ID, activeCleaner, logger)
+		handleMessage(s, message.Message, "update", me.ID, activeCleaner, logger)
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -146,6 +147,7 @@ func reloadConfigLoop(ctx context.Context, configPath string, interval time.Dura
 func handleMessage(
 	s *discordgo.Session,
 	message *discordgo.Message,
+	event string,
 	botUserID string,
 	activeCleaner *cleanerStore,
 	logger *log.Logger,
@@ -161,15 +163,53 @@ func handleMessage(
 	}
 
 	decision := cleaner.Decide(messageFromDiscord(message))
+	if decision.SpoilerCheck != nil {
+		logSpoilerCheck(logger, event, decision)
+	}
 	if !decision.Delete {
 		return
 	}
 
 	if err := s.ChannelMessageDelete(message.ChannelID, message.ID); err != nil {
-		logger.Printf("delete failed channel=%s message=%s author=%s reason=%q error=%v", message.ChannelID, message.ID, message.Author.ID, decision.Reason, err)
+		logDeleteFailure(logger, event, decision.Kind, err)
 		return
 	}
-	logger.Printf("deleted channel=%s message=%s author=%s reason=%q", message.ChannelID, message.ID, message.Author.ID, decision.Reason)
+	logger.Printf("delete succeeded event=%s rule=%s", event, decision.Kind)
+}
+
+func logSpoilerCheck(logger *log.Logger, event string, decision bot.Decision) {
+	check := decision.SpoilerCheck
+	logger.Printf(
+		"spoiler check event=%s attachments=%d flags=%d legacy_markers=%d images=%d matching_attachments=%d visual_components=%t delete=%t",
+		event,
+		check.Attachments,
+		check.FlaggedAttachments,
+		check.LegacyMarkers,
+		check.ImageAttachments,
+		check.MatchingAttachments,
+		check.SpoileredVisualMedia,
+		decision.Delete && decision.Kind == bot.DecisionSpoilerMedia,
+	)
+}
+
+func logDeleteFailure(logger *log.Logger, event string, kind bot.DecisionKind, err error) {
+	var restError *discordgo.RESTError
+	if errors.As(err, &restError) {
+		httpStatus := 0
+		if restError.Response != nil {
+			httpStatus = restError.Response.StatusCode
+		}
+		discordCode := 0
+		if restError.Message != nil {
+			discordCode = restError.Message.Code
+		}
+		logger.Printf(
+			"delete failed event=%s rule=%s http_status=%d discord_code=%d",
+			event, kind, httpStatus, discordCode,
+		)
+		return
+	}
+	logger.Printf("delete failed event=%s rule=%s error_type=%T", event, kind, err)
 }
 
 func messageFromDiscord(message *discordgo.Message) bot.Message {

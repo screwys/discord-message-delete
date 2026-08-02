@@ -25,9 +25,7 @@ type CompiledConfig struct {
 }
 
 type RegexRule struct {
-	Name    string
-	Pattern string
-	Regex   *regexp.Regexp
+	Regex *regexp.Regexp
 }
 
 func LoadConfig(path string) (*CompiledConfig, error) {
@@ -61,9 +59,9 @@ func CompileConfig(config Config) (*CompiledConfig, error) {
 		}
 		compiled, err := regexp.Compile(rule.Pattern)
 		if err != nil {
-			return nil, fmt.Errorf("message_regexes[%d] %q: %w", index, rule.Pattern, err)
+			return nil, fmt.Errorf("message_regexes[%d] is invalid", index)
 		}
-		regexRules = append(regexRules, RegexRule{Name: rule.Name, Pattern: rule.Pattern, Regex: compiled})
+		regexRules = append(regexRules, RegexRule{Regex: compiled})
 	}
 
 	return &CompiledConfig{
@@ -71,11 +69,4 @@ func CompileConfig(config Config) (*CompiledConfig, error) {
 		IgnoredUserIDs:     ignoredUsers,
 		MessageRegexes:     regexRules,
 	}, nil
-}
-
-func (rule RegexRule) Label() string {
-	if rule.Name != "" {
-		return rule.Name
-	}
-	return rule.Pattern
 }

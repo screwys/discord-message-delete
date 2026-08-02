@@ -75,6 +75,15 @@ View logs:
 journalctl --user -u spoiler-cleaner.service -f
 ```
 
+For the configured spoiler target, each new message or edit produces a privacy-safe summary like:
+
+```text
+spoiler check event=create attachments=2 flags=1 legacy_markers=0 images=2 matching_attachments=1 visual_components=false delete=true
+delete succeeded event=create rule=spoiler_media
+```
+
+`flags` counts Discord's spoiler attachment flag, `legacy_markers` counts the older filename marker, and `visual_components` covers spoilered component or forwarded-snapshot media. The logs omit message text, filenames, URLs, user and channel IDs, regex contents, config, and tokens.
+
 Keep the user service running after logout:
 
 ```sh

@@ -1,6 +1,9 @@
 package bot
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDeletesSpoileredImagesOnlyForConfiguredUser(t *testing.T) {
 	cleaner := newTestCleaner(t, Config{SpoilerImageUserID: "target-user"})
@@ -169,10 +172,40 @@ func TestIgnoredUserOverridesAllRules(t *testing.T) {
 
 func TestCompileConfigRejectsInvalidRegex(t *testing.T) {
 	_, err := CompileConfig(Config{
-		MessageRegexes: []RegexRuleConfig{{Name: "bad pattern", Pattern: `[`}},
+		MessageRegexes: []RegexRuleConfig{{Name: "bad pattern", Pattern: `private-term[`}},
 	})
 	if err == nil {
 		t.Fatal("CompileConfig returned nil error for invalid regex")
+	}
+	if strings.Contains(err.Error(), "private-term") {
+		t.Fatalf("CompileConfig error exposed the regex pattern: %q", err)
+	}
+}
+
+func TestSpoilerCheckExplainsDecision(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{SpoilerImageUserID: "target-user"})
+	decision := cleaner.Decide(Message{
+		AuthorID: "target-user",
+		Attachments: []Attachment{
+			{Filename: "image.png", ContentType: "image/png", Spoiler: true},
+			{Filename: "SPOILER_notes.txt", ContentType: "text/plain"},
+			{Filename: "ordinary.webp", ContentType: "image/webp"},
+		},
+	})
+
+	if !decision.Delete {
+		t.Fatal("Delete = false, want true")
+	}
+	check := decision.SpoilerCheck
+	if check == nil {
+		t.Fatal("SpoilerCheck = nil, want check details")
+	}
+	if check.Attachments != 3 ||
+		check.FlaggedAttachments != 1 ||
+		check.LegacyMarkers != 1 ||
+		check.ImageAttachments != 2 ||
+		check.MatchingAttachments != 1 {
+		t.Fatalf("SpoilerCheck = %+v, want attachment counts 3/1/1/2/1", *check)
 	}
 }
 

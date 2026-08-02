@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"fmt"
 	"mime"
 	"path/filepath"
 	"strings"
@@ -48,8 +47,25 @@ type EmbedField struct {
 }
 
 type Decision struct {
-	Delete bool
-	Reason string
+	Delete       bool
+	Kind         DecisionKind
+	SpoilerCheck *SpoilerCheck
+}
+
+type DecisionKind string
+
+const (
+	DecisionSpoilerMedia DecisionKind = "spoiler_media"
+	DecisionMessageRegex DecisionKind = "message_regex"
+)
+
+type SpoilerCheck struct {
+	Attachments          int
+	FlaggedAttachments   int
+	LegacyMarkers        int
+	ImageAttachments     int
+	MatchingAttachments  int
+	SpoileredVisualMedia bool
 }
 
 func NewCleaner(config *CompiledConfig) *Cleaner {
@@ -63,10 +79,16 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 	if _, ignored := cleaner.config.IgnoredUserIDs[message.AuthorID]; ignored {
 		return Decision{}
 	}
-	if cleaner.config.SpoilerImageUserID != "" &&
-		message.AuthorID == cleaner.config.SpoilerImageUserID {
-		if message.SpoileredVisualMedia || hasSpoileredImageAttachment(message.Attachments) {
-			return Decision{Delete: true, Reason: "spoilered image from configured user"}
+	var spoilerCheck *SpoilerCheck
+	if cleaner.config.SpoilerImageUserID != "" && message.AuthorID == cleaner.config.SpoilerImageUserID {
+		check := inspectSpoilerMedia(message)
+		spoilerCheck = &check
+		if check.MatchingAttachments > 0 || check.SpoileredVisualMedia {
+			return Decision{
+				Delete:       true,
+				Kind:         DecisionSpoilerMedia,
+				SpoilerCheck: spoilerCheck,
+			}
 		}
 	}
 
@@ -75,10 +97,14 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 	for _, rule := range cleaner.config.MessageRegexes {
 		if rule.Regex.MatchString(searchText) ||
 			(foldedSearchText != searchText && rule.Regex.MatchString(foldedSearchText)) {
-			return Decision{Delete: true, Reason: fmt.Sprintf("message regex matched: %s", rule.Label())}
+			return Decision{
+				Delete:       true,
+				Kind:         DecisionMessageRegex,
+				SpoilerCheck: spoilerCheck,
+			}
 		}
 	}
-	return Decision{}
+	return Decision{SpoilerCheck: spoilerCheck}
 }
 
 func messageSearchText(message Message) string {
@@ -145,13 +171,29 @@ func isDefaultIgnorable(char rune) bool {
 		unicode.Is(unicode.Other_Default_Ignorable_Code_Point, char)
 }
 
-func hasSpoileredImageAttachment(attachments []Attachment) bool {
-	for _, attachment := range attachments {
-		if (attachment.Spoiler || isSpoilerFilename(attachment.Filename)) && isImageAttachment(attachment) {
-			return true
+func inspectSpoilerMedia(message Message) SpoilerCheck {
+	check := SpoilerCheck{
+		Attachments:          len(message.Attachments),
+		SpoileredVisualMedia: message.SpoileredVisualMedia,
+	}
+	for _, attachment := range message.Attachments {
+		flagged := attachment.Spoiler
+		legacyMarked := isSpoilerFilename(attachment.Filename)
+		image := isImageAttachment(attachment)
+		if flagged {
+			check.FlaggedAttachments++
+		}
+		if legacyMarked {
+			check.LegacyMarkers++
+		}
+		if image {
+			check.ImageAttachments++
+		}
+		if (flagged || legacyMarked) && image {
+			check.MatchingAttachments++
 		}
 	}
-	return false
+	return check
 }
 
 func isSpoilerFilename(filename string) bool {
