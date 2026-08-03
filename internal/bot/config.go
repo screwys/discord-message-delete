@@ -57,7 +57,7 @@ func CompileConfig(config Config) (*CompiledConfig, error) {
 		if rule.Pattern == "" {
 			return nil, fmt.Errorf("message_regexes[%d].pattern is required", index)
 		}
-		compiled, err := regexp.Compile(rule.Pattern)
+		compiled, err := regexp.Compile("(?i:" + rule.Pattern + ")")
 		if err != nil {
 			return nil, fmt.Errorf("message_regexes[%d] is invalid", index)
 		}

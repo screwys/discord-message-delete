@@ -91,7 +91,7 @@ func TestDeletesSpoileredImagesOnlyForConfiguredUser(t *testing.T) {
 
 func TestMessageRegexesDeleteMatchingContent(t *testing.T) {
 	cleaner := newTestCleaner(t, Config{
-		MessageRegexes: []RegexRuleConfig{{Name: "blocked phrase", Pattern: `(?i)\bblocked phrase\b`}},
+		MessageRegexes: []RegexRuleConfig{{Name: "blocked phrase", Pattern: `\bblocked phrase\b`}},
 	})
 
 	tests := []struct {
@@ -111,6 +111,17 @@ func TestMessageRegexesDeleteMatchingContent(t *testing.T) {
 				t.Fatalf("Delete = %v, want %v", decision.Delete, test.delete)
 			}
 		})
+	}
+}
+
+func TestMessageRegexesAreCaseInsensitiveByDefault(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{
+		MessageRegexes: []RegexRuleConfig{{Name: "blocked word", Pattern: `Word`}},
+	})
+
+	decision := cleaner.Decide(Message{AuthorID: "member", Content: "word"})
+	if !decision.Delete {
+		t.Fatal("Delete = false, want true")
 	}
 }
 
