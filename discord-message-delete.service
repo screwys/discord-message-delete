@@ -1,0 +1,16 @@
+[Unit]
+Description=Discord Message Delete bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/discord-message-delete
+ExecStartPre=/usr/bin/mkdir -p %h/.local/bin
+ExecStartPre=/usr/bin/ln -sfn %h/Projects/discord-message-delete/discord-message-delete %h/.local/bin/discord-message-delete
+ExecStart=%h/Projects/discord-message-delete/discord-message-delete -config config.json -env .env
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

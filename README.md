@@ -1,6 +1,6 @@
-# Spoiler Cleaner Discord Bot
+# Discord Message Delete
 
-A small Go Discord bot that deletes messages from one configured user when they contain spoilered visual media, and deletes messages from non-ignored users when content or embed metadata matches configured regex rules.
+A small Go Discord bot that deletes messages according to configurable rules. Its spoiler cleaner deletes messages from one configured user when they contain spoilered visual media, while regex rules delete matching messages from non-ignored users.
 
 Discord can represent spoilered media through attachment flags, visual components, or forwarded-message snapshots. The bot also recognizes the older `SPOILER_` filename convention. It deletes the whole message because bots cannot remove a single attachment from another user's message.
 
@@ -48,7 +48,7 @@ Regex rules are matched case-insensitively against message content and embed met
 ## Run Manually
 
 ```sh
-go run ./cmd/spoilercleaner -config config.json
+go run ./cmd/discord-message-delete -config config.json
 ```
 
 ## Install As A User Service
@@ -56,9 +56,9 @@ go run ./cmd/spoilercleaner -config config.json
 After `config.json` and `.env` exist in this repo, build the binary and install the service:
 
 ```sh
-go build -o spoiler-cleaner ./cmd/spoilercleaner
+go build -o discord-message-delete ./cmd/discord-message-delete
 mkdir -p ~/.config/systemd/user
-cp spoiler-cleaner.service ~/.config/systemd/user/spoiler-cleaner.service
+cp discord-message-delete.service ~/.config/systemd/user/discord-message-delete.service
 chmod 600 .env
 ```
 
@@ -66,13 +66,24 @@ Start it:
 
 ```sh
 ./scripts/start-service.sh
-systemctl --user status spoiler-cleaner.service
+discord-message-delete status
+```
+
+The start script disables and removes the former `spoiler-cleaner.service` unit if it is still installed, preventing both names from running at once.
+
+When the service starts, it creates `~/.local/bin/discord-message-delete` as a link to the built binary. Most Linux desktop sessions include `~/.local/bin` in `PATH`. If yours does not, add that directory to your shell's `PATH` once; a service cannot change the environment of an already-running shell.
+
+The command accepts `start`, `stop`, `restart`, `status`, `enable`, `disable`, and `logs`. For example:
+
+```sh
+discord-message-delete restart
+discord-message-delete logs
 ```
 
 View logs:
 
 ```sh
-journalctl --user -u spoiler-cleaner.service -f
+discord-message-delete logs
 ```
 
 For the configured spoiler target, each new message or edit produces a privacy-safe summary like:

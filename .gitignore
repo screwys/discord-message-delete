@@ -1,4 +1,5 @@
 .env
 config.json
 spoiler-cleaner
+discord-message-delete
 dist/

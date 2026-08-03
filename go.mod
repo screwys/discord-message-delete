@@ -1,4 +1,4 @@
-module spoiler-cleaner
+module discord-message-delete
 
 go 1.25.0
 
