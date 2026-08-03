@@ -134,6 +134,10 @@ func TestMessageRegexesMatchUnicodeConfusables(t *testing.T) {
 	if !decision.Delete {
 		t.Fatal("Delete = false, want true")
 	}
+	check := decision.MessageCheck
+	if check == nil || check.OriginalMatched || !check.NormalizationChanged || !check.NormalizedMatched {
+		t.Fatalf("MessageCheck = %+v, want normalized-only match", check)
+	}
 }
 
 func TestMessageRegexesIgnoreInvisibleFormatting(t *testing.T) {
@@ -178,6 +182,27 @@ func TestIgnoredUserOverridesAllRules(t *testing.T) {
 	})
 	if decision.Delete {
 		t.Fatalf("Delete = true, want false")
+	}
+	if decision.MessageCheck == nil || !decision.MessageCheck.Ignored {
+		t.Fatalf("MessageCheck = %+v, want ignored check", decision.MessageCheck)
+	}
+}
+
+func TestMessageCheckExplainsRegexDecision(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{
+		MessageRegexes: []RegexRuleConfig{{Name: "blocked term", Pattern: `ExampleTerm`}},
+	})
+
+	decision := cleaner.Decide(Message{AuthorID: "member", Content: "exampleterm"})
+	if !decision.Delete {
+		t.Fatal("Delete = false, want true")
+	}
+	check := decision.MessageCheck
+	if check == nil {
+		t.Fatal("MessageCheck = nil, want check details")
+	}
+	if check.Ignored || check.RegexRules != 1 || !check.SearchableText || !check.RegexEvaluated || !check.RegexMatched {
+		t.Fatalf("MessageCheck = %+v, want evaluated matching rule", *check)
 	}
 }
 

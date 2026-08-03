@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 )
 
@@ -29,9 +30,33 @@ type RegexRule struct {
 }
 
 func LoadConfig(path string) (*CompiledConfig, error) {
-	file, err := os.Open(path)
+	config, err := readConfig(path)
 	if err != nil {
 		return nil, err
+	}
+	return CompileConfig(config)
+}
+
+func AppendRegexRule(path string, pattern string) error {
+	config, err := readConfig(path)
+	if err != nil {
+		return err
+	}
+
+	config.MessageRegexes = append(config.MessageRegexes, RegexRuleConfig{
+		Name:    pattern,
+		Pattern: pattern,
+	})
+	if _, err := CompileConfig(config); err != nil {
+		return err
+	}
+	return writeConfig(path, config)
+}
+
+func readConfig(path string) (Config, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return Config{}, err
 	}
 	defer file.Close()
 
@@ -39,9 +64,46 @@ func LoadConfig(path string) (*CompiledConfig, error) {
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&config); err != nil {
-		return nil, err
+		return Config{}, err
 	}
-	return CompileConfig(config)
+	return config, nil
+}
+
+func writeConfig(path string, config Config) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	contents, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	contents = append(contents, '\n')
+
+	directory := filepath.Dir(path)
+	temporary, err := os.CreateTemp(directory, ".config-*.json")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+
+	if err := temporary.Chmod(info.Mode().Perm()); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(contents); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
 }
 
 func CompileConfig(config Config) (*CompiledConfig, error) {

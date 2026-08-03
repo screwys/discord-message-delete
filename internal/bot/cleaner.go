@@ -50,6 +50,7 @@ type Decision struct {
 	Delete       bool
 	Kind         DecisionKind
 	SpoilerCheck *SpoilerCheck
+	MessageCheck *MessageCheck
 }
 
 type DecisionKind string
@@ -68,6 +69,17 @@ type SpoilerCheck struct {
 	SpoileredVisualMedia bool
 }
 
+type MessageCheck struct {
+	Ignored              bool
+	RegexRules           int
+	SearchableText       bool
+	RegexEvaluated       bool
+	OriginalMatched      bool
+	NormalizationChanged bool
+	NormalizedMatched    bool
+	RegexMatched         bool
+}
+
 func NewCleaner(config *CompiledConfig) *Cleaner {
 	return &Cleaner{config: config}
 }
@@ -76,8 +88,14 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 	if cleaner == nil || cleaner.config == nil {
 		return Decision{}
 	}
+	searchText := messageSearchText(message)
+	messageCheck := &MessageCheck{
+		RegexRules:     len(cleaner.config.MessageRegexes),
+		SearchableText: searchText != "",
+	}
 	if _, ignored := cleaner.config.IgnoredUserIDs[message.AuthorID]; ignored {
-		return Decision{}
+		messageCheck.Ignored = true
+		return Decision{MessageCheck: messageCheck}
 	}
 	var spoilerCheck *SpoilerCheck
 	if cleaner.config.SpoilerImageUserID != "" && message.AuthorID == cleaner.config.SpoilerImageUserID {
@@ -88,23 +106,30 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 				Delete:       true,
 				Kind:         DecisionSpoilerMedia,
 				SpoilerCheck: spoilerCheck,
+				MessageCheck: messageCheck,
 			}
 		}
 	}
 
-	searchText := messageSearchText(message)
+	messageCheck.RegexEvaluated = true
 	foldedSearchText := foldConfusableText(searchText)
+	messageCheck.NormalizationChanged = foldedSearchText != searchText
 	for _, rule := range cleaner.config.MessageRegexes {
-		if rule.Regex.MatchString(searchText) ||
-			(foldedSearchText != searchText && rule.Regex.MatchString(foldedSearchText)) {
+		originalMatched := rule.Regex.MatchString(searchText)
+		normalizedMatched := messageCheck.NormalizationChanged && rule.Regex.MatchString(foldedSearchText)
+		messageCheck.OriginalMatched = messageCheck.OriginalMatched || originalMatched
+		messageCheck.NormalizedMatched = messageCheck.NormalizedMatched || normalizedMatched
+		if originalMatched || normalizedMatched {
+			messageCheck.RegexMatched = true
 			return Decision{
 				Delete:       true,
 				Kind:         DecisionMessageRegex,
 				SpoilerCheck: spoilerCheck,
+				MessageCheck: messageCheck,
 			}
 		}
 	}
-	return Decision{SpoilerCheck: spoilerCheck}
+	return Decision{SpoilerCheck: spoilerCheck, MessageCheck: messageCheck}
 }
 
 func messageSearchText(message Message) string {

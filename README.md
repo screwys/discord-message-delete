@@ -73,27 +73,27 @@ The start script disables and removes the former `spoiler-cleaner.service` unit 
 
 When the service starts, it creates `~/.local/bin/discord-message-delete` as a link to the built binary. Most Linux desktop sessions include `~/.local/bin` in `PATH`. If yours does not, add that directory to your shell's `PATH` once; a service cannot change the environment of an already-running shell.
 
-The command accepts `start`, `stop`, `restart`, `status`, `enable`, `disable`, and `logs`. For example:
+The command accepts `start`, `stop`, `restart`, `reload`, `status`, `enable`, `disable`, and `logs`. For example:
 
 ```sh
 discord-message-delete restart
 discord-message-delete logs
 ```
 
+Add a case-insensitive regex to the active ruleset:
+
+```sh
+discord-message-delete rule add example
+discord-message-delete rule add '\bblocked phrase\b'
+```
+
+The command validates the regex, appends it to `message_regexes` in `config.json`, preserves the other settings, and reloads the running service immediately. Quote patterns that contain spaces or shell metacharacters.
+
 View logs:
 
 ```sh
 discord-message-delete logs
 ```
-
-For the configured spoiler target, each new message or edit produces a privacy-safe summary like:
-
-```text
-spoiler check event=create attachments=2 flags=1 legacy_markers=0 images=2 matching_attachments=1 visual_components=false delete=true
-delete succeeded event=create rule=spoiler_media
-```
-
-`flags` counts Discord's spoiler attachment flag, `legacy_markers` counts the older filename marker, and `visual_components` covers spoilered component or forwarded-snapshot media. The logs omit message text, filenames, URLs, user and channel IDs, regex contents, config, and tokens.
 
 Keep the user service running after logout:
 
