@@ -44,6 +44,32 @@ func TestAppendRegexRulePreservesConfigAndAppendsRule(t *testing.T) {
 	}
 }
 
+func TestAppendRegexRuleKeepsRepeatedAddsReloadable(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": []
+}
+`)
+
+	for _, pattern := range []string{"first", "second", "third"} {
+		if err := AppendRegexRule(path, pattern); err != nil {
+			t.Fatalf("AppendRegexRule(%q): %v", pattern, err)
+		}
+	}
+
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig after repeated adds: %v", err)
+	}
+	if len(config.MessageRegexes) != 3 {
+		t.Fatalf("len(MessageRegexes) = %d, want 3", len(config.MessageRegexes))
+	}
+	if _, err := CompileConfig(config); err != nil {
+		t.Fatalf("CompileConfig after repeated adds: %v", err)
+	}
+}
+
 func TestAppendRegexRuleRejectsInvalidPatternWithoutChangingConfig(t *testing.T) {
 	path := writeTestConfig(t, `{
   "spoiler_image_user_id": "",

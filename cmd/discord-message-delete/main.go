@@ -86,7 +86,7 @@ func main() {
 	if err != nil {
 		logger.Fatalf("create Discord session: %v", err)
 	}
-	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
+	session.Identify.Intents = gatewayIntents()
 
 	me, err := session.User("@me")
 	if err != nil {
@@ -94,7 +94,10 @@ func main() {
 	}
 
 	session.AddHandler(func(_ *discordgo.Session, ready *discordgo.Ready) {
-		logger.Print("connected")
+		logReady(logger, ready)
+	})
+	session.AddHandler(func(_ *discordgo.Session, _ *discordgo.Resumed) {
+		logger.Print("gateway resumed")
 	})
 	session.AddHandler(func(s *discordgo.Session, message *discordgo.MessageCreate) {
 		handleMessage(s, message.Message, "create", me.ID, activeCleaner, logger)
@@ -111,6 +114,20 @@ func main() {
 	logger.Print("bot is running")
 	<-ctx.Done()
 	logger.Print("shutting down")
+}
+
+func gatewayIntents() discordgo.Intent {
+	return discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMessages |
+		discordgo.IntentsMessageContent
+}
+
+func logReady(logger *log.Logger, ready *discordgo.Ready) {
+	guilds := 0
+	if ready != nil {
+		guilds = len(ready.Guilds)
+	}
+	logger.Printf("connected guilds=%d", guilds)
 }
 
 func runServiceCommand(args []string) (bool, int) {

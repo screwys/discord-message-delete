@@ -28,6 +28,26 @@ func TestAttachmentsFromDiscordPreservesSpoilerFlag(t *testing.T) {
 	}
 }
 
+func TestReadyLogContainsOnlyGuildCount(t *testing.T) {
+	var output bytes.Buffer
+	logger := log.New(&output, "", 0)
+	logReady(logger, &discordgo.Ready{Guilds: []*discordgo.Guild{{}, {}}})
+
+	want := "connected guilds=2\n"
+	if output.String() != want {
+		t.Fatalf("log output = %q, want %q", output.String(), want)
+	}
+}
+
+func TestGatewayIntentsCoverGuildMessagesAndContent(t *testing.T) {
+	want := discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMessages |
+		discordgo.IntentsMessageContent
+	if gatewayIntents() != want {
+		t.Fatalf("gatewayIntents() = %d, want %d", gatewayIntents(), want)
+	}
+}
+
 func TestMessageFromDiscordDetectsSpoileredVisualComponent(t *testing.T) {
 	var message discordgo.Message
 	err := json.Unmarshal([]byte(`{
