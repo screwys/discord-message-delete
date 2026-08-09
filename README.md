@@ -1,6 +1,6 @@
 # Discord Message Delete
 
-A small Go Discord bot that deletes messages according to configurable rules. Its spoiler cleaner deletes messages from one configured user when they contain spoilered visual media, while regex rules delete matching messages from non-ignored users.
+A small Go Discord bot that deletes messages according to configurable rules. Its spoiler cleaner deletes messages from one configured user when they contain spoilered visual media, regex rules delete matching messages from non-ignored users, and emoji rules delete messages containing a configured emoji.
 
 Discord can represent spoilered media through attachment flags, visual components, or forwarded-message snapshots. The bot also recognizes the older `SPOILER_` filename convention. It deletes the whole message because bots cannot remove a single attachment from another user's message.
 
@@ -42,6 +42,8 @@ $EDITOR .env
 To get a Discord user ID, enable **User Settings > Advanced > Developer Mode**, then right-click the user and choose **Copy User ID**.
 
 Regex rules are matched case-insensitively against message content and embed metadata such as title, description, author, provider, footer, fields, and URLs. Each rule is checked against both the original text and a Unicode confusable-folded copy, with invisible formatting characters removed from the folded copy.
+
+Emoji rules accept a supported shortcode such as `:thumbsup:`, the Unicode emoji itself, or a custom emoji mention copied from Discord such as `<:party:123456789012345678>`. Shortcodes are stored as their Unicode emoji, and custom emoji are matched by ID so renaming one does not bypass the rule.
 
 `config.json` and `.env` are ignored by Git so tokens and server-specific settings do not get pushed to a public repo.
 
@@ -88,7 +90,18 @@ discord-message-delete rule add '\bblocked phrase\b'
 discord-message-delete rule delete example
 ```
 
-The command parses and validates the complete configuration, deduplicates `message_regexes` by exact pattern, preserves the other settings, and atomically writes properly formatted JSON. After a successful change it restarts the service so the saved rules and running process cannot diverge. Deletion matches the exact regex string. Quote patterns that contain spaces or shell metacharacters.
+Add or delete an emoji rule:
+
+```sh
+discord-message-delete rule add emoji :thumbsup:
+discord-message-delete rule add emoji '👍'
+discord-message-delete rule add emoji '<:party:123456789012345678>'
+discord-message-delete rule delete emoji :thumbsup:
+```
+
+The command parses and validates the complete configuration, deduplicates regex rules by exact pattern and emoji aliases by identity, preserves the other settings, and atomically writes properly formatted JSON. After a successful change it restarts the service so the saved rules and running process cannot diverge. Regex deletion matches the exact regex string. Quote values that contain spaces or shell metacharacters.
+
+Emoji rules also remove matching reactions as they are added. Discord sends reaction events over the existing gateway connection, and the bot removes all reactions with that emoji from only the affected message. It does not poll or scan channel history, so reactions on untouched old messages remain until someone adds that emoji to the message again.
 
 View logs:
 
@@ -102,4 +115,4 @@ Keep the user service running after logout:
 loginctl enable-linger "$USER"
 ```
 
-The bot acts on new messages and message edits it receives while running; it does not scan old channel history.
+The bot acts on new messages, message edits, and reaction additions it receives while running; it does not scan old channel history.

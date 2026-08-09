@@ -186,6 +186,95 @@ func TestRemoveRegexRuleLeavesConfigUnchangedWhenRuleIsMissing(t *testing.T) {
 	}
 }
 
+func TestAddEmojiRuleResolvesShortcodeAndDeduplicatesAliases(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [],
+  "emoji_rules": []
+}
+`)
+
+	added, err := AddEmojiRule(path, ":thumbsup:")
+	if err != nil {
+		t.Fatalf("AddEmojiRule shortcode: %v", err)
+	}
+	if !added {
+		t.Fatal("added = false, want true")
+	}
+	added, err = AddEmojiRule(path, ":+1:")
+	if err != nil {
+		t.Fatalf("AddEmojiRule alias: %v", err)
+	}
+	if added {
+		t.Fatal("alias added = true, want false")
+	}
+
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	if len(config.EmojiRules) != 1 || config.EmojiRules[0] != "👍" {
+		t.Fatalf("EmojiRules = %q, want [👍]", config.EmojiRules)
+	}
+}
+
+func TestEmojiRuleAcceptsCustomEmojiAndDeletesBySameIdentity(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [],
+  "emoji_rules": []
+}
+`)
+
+	added, err := AddEmojiRule(path, "<a:party:123456789012345678>")
+	if err != nil {
+		t.Fatalf("AddEmojiRule: %v", err)
+	}
+	if !added {
+		t.Fatal("added = false, want true")
+	}
+	added, err = AddEmojiRule(path, "<:renamed:123456789012345678>")
+	if err != nil {
+		t.Fatalf("AddEmojiRule renamed: %v", err)
+	}
+	if added {
+		t.Fatal("renamed custom emoji added = true, want false")
+	}
+	removed, err := RemoveEmojiRule(path, "<:renamed:123456789012345678>")
+	if err != nil {
+		t.Fatalf("RemoveEmojiRule: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+}
+
+func TestAddEmojiRuleRejectsUnknownShortcodeWithoutChangingConfig(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": []
+}
+`)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile: %v", err)
+	}
+
+	if _, err := AddEmojiRule(path, ":not_a_known_emoji:"); err == nil {
+		t.Fatal("AddEmojiRule returned nil error for unknown shortcode")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile after AddEmojiRule: %v", err)
+	}
+	if string(after) != string(original) {
+		t.Fatal("invalid emoji rule changed config")
+	}
+}
+
 func writeTestConfig(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")

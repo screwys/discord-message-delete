@@ -173,11 +173,12 @@ func TestIgnoredUserOverridesAllRules(t *testing.T) {
 		SpoilerImageUserID: "ignored-user",
 		IgnoredUserIDs:     []string{"ignored-user"},
 		MessageRegexes:     []RegexRuleConfig{{Name: "anything", Pattern: `.+`}},
+		EmojiRules:         []string{":thumbsup:"},
 	})
 
 	decision := cleaner.Decide(Message{
 		AuthorID:    "ignored-user",
-		Content:     "matches any non-empty message",
+		Content:     "matches any non-empty message 👍",
 		Attachments: []Attachment{{Filename: "SPOILER_photo.png", ContentType: "image/png"}},
 	})
 	if decision.Delete {
@@ -242,6 +243,58 @@ func TestSpoilerCheckExplainsDecision(t *testing.T) {
 		check.ImageAttachments != 2 ||
 		check.MatchingAttachments != 1 {
 		t.Fatalf("SpoilerCheck = %+v, want attachment counts 3/1/1/2/1", *check)
+	}
+}
+
+func TestEmojiRuleDeletesMessageContainingConfiguredEmoji(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{EmojiRules: []string{":thumbsup:"}})
+
+	decision := cleaner.Decide(Message{AuthorID: "member", Content: "approved 👍"})
+	if !decision.Delete || decision.Kind != DecisionEmoji {
+		t.Fatalf("decision = %+v, want emoji deletion", decision)
+	}
+	if decision.EmojiCheck == nil || !decision.EmojiCheck.Matched || decision.EmojiCheck.RulesLoaded != 1 {
+		t.Fatalf("EmojiCheck = %+v, want one matching rule", decision.EmojiCheck)
+	}
+}
+
+func TestEmojiRuleDoesNotMatchDifferentEmoji(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{EmojiRules: []string{":thumbsup:"}})
+
+	decision := cleaner.Decide(Message{AuthorID: "member", Content: "not this one 👎"})
+	if decision.Delete {
+		t.Fatalf("Delete = true, want false")
+	}
+}
+
+func TestCustomEmojiRuleMatchesMessageByEmojiID(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{EmojiRules: []string{"<:party:123456789012345678>"}})
+
+	decision := cleaner.Decide(Message{
+		AuthorID: "member",
+		Content:  "<a:renamed:123456789012345678>",
+	})
+	if !decision.Delete || decision.Kind != DecisionEmoji {
+		t.Fatalf("decision = %+v, want custom emoji deletion", decision)
+	}
+}
+
+func TestEmojiRuleMatchesNewReactionsWithoutMessageHistory(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{
+		EmojiRules: []string{":thumbsup:", "<:party:123456789012345678>"},
+	})
+
+	standard := cleaner.DecideReaction(ReactionEmoji{Name: "👍"})
+	if !standard.Remove || standard.RulesLoaded != 2 {
+		t.Fatalf("standard decision = %+v, want removal with two loaded rules", standard)
+	}
+	custom := cleaner.DecideReaction(ReactionEmoji{ID: "123456789012345678", Name: "renamed"})
+	if !custom.Remove {
+		t.Fatalf("custom decision = %+v, want removal", custom)
+	}
+	other := cleaner.DecideReaction(ReactionEmoji{Name: "👎"})
+	if other.Remove {
+		t.Fatalf("other decision = %+v, want no removal", other)
 	}
 }
 

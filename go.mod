@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
+	github.com/kyokomi/emoji/v2 v2.2.13
 	github.com/mtibben/confusables v0.0.0-20210201002637-9d1b0723b659
 )
 

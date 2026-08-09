@@ -51,6 +51,7 @@ type Decision struct {
 	Kind         DecisionKind
 	SpoilerCheck *SpoilerCheck
 	MessageCheck *MessageCheck
+	EmojiCheck   *EmojiCheck
 }
 
 type DecisionKind string
@@ -58,6 +59,7 @@ type DecisionKind string
 const (
 	DecisionSpoilerMedia DecisionKind = "spoiler_media"
 	DecisionMessageRegex DecisionKind = "message_regex"
+	DecisionEmoji        DecisionKind = "emoji"
 )
 
 type SpoilerCheck struct {
@@ -80,6 +82,22 @@ type MessageCheck struct {
 	RegexMatched         bool
 }
 
+type EmojiCheck struct {
+	RulesLoaded    int
+	SearchableText bool
+	Matched        bool
+}
+
+type ReactionEmoji struct {
+	ID   string
+	Name string
+}
+
+type ReactionDecision struct {
+	Remove      bool
+	RulesLoaded int
+}
+
 func NewCleaner(config *CompiledConfig) *Cleaner {
 	return &Cleaner{config: config}
 }
@@ -93,9 +111,13 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 		RegexRules:     len(cleaner.config.MessageRegexes),
 		SearchableText: searchText != "",
 	}
+	emojiCheck := &EmojiCheck{
+		RulesLoaded:    len(cleaner.config.EmojiRules),
+		SearchableText: searchText != "",
+	}
 	if _, ignored := cleaner.config.IgnoredUserIDs[message.AuthorID]; ignored {
 		messageCheck.Ignored = true
-		return Decision{MessageCheck: messageCheck}
+		return Decision{MessageCheck: messageCheck, EmojiCheck: emojiCheck}
 	}
 	var spoilerCheck *SpoilerCheck
 	if cleaner.config.SpoilerImageUserID != "" && message.AuthorID == cleaner.config.SpoilerImageUserID {
@@ -107,6 +129,20 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 				Kind:         DecisionSpoilerMedia,
 				SpoilerCheck: spoilerCheck,
 				MessageCheck: messageCheck,
+				EmojiCheck:   emojiCheck,
+			}
+		}
+	}
+
+	for _, rule := range cleaner.config.EmojiRules {
+		if rule.matchesText(searchText) {
+			emojiCheck.Matched = true
+			return Decision{
+				Delete:       true,
+				Kind:         DecisionEmoji,
+				SpoilerCheck: spoilerCheck,
+				MessageCheck: messageCheck,
+				EmojiCheck:   emojiCheck,
 			}
 		}
 	}
@@ -126,10 +162,44 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 				Kind:         DecisionMessageRegex,
 				SpoilerCheck: spoilerCheck,
 				MessageCheck: messageCheck,
+				EmojiCheck:   emojiCheck,
 			}
 		}
 	}
-	return Decision{SpoilerCheck: spoilerCheck, MessageCheck: messageCheck}
+	return Decision{SpoilerCheck: spoilerCheck, MessageCheck: messageCheck, EmojiCheck: emojiCheck}
+}
+
+func (cleaner *Cleaner) DecideReaction(reaction ReactionEmoji) ReactionDecision {
+	if cleaner == nil || cleaner.config == nil {
+		return ReactionDecision{}
+	}
+	decision := ReactionDecision{RulesLoaded: len(cleaner.config.EmojiRules)}
+	for _, rule := range cleaner.config.EmojiRules {
+		if rule.matchesReaction(reaction) {
+			decision.Remove = true
+			return decision
+		}
+	}
+	return decision
+}
+
+func (rule EmojiRule) matchesText(text string) bool {
+	if rule.Unicode != "" {
+		return strings.Contains(text, rule.Unicode)
+	}
+	for _, match := range customEmojiInTextPattern.FindAllStringSubmatch(text, -1) {
+		if len(match) > 2 && match[2] == rule.CustomID {
+			return true
+		}
+	}
+	return false
+}
+
+func (rule EmojiRule) matchesReaction(reaction ReactionEmoji) bool {
+	if rule.CustomID != "" {
+		return reaction.ID == rule.CustomID
+	}
+	return reaction.ID == "" && reaction.Name == rule.Unicode
 }
 
 func messageSearchText(message Message) string {

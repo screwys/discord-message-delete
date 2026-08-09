@@ -28,7 +28,15 @@ type cleanerStore struct {
 const discordAttachmentFlagSpoiler discordgo.MessageAttachmentFlags = 1 << 3
 
 const serviceName = "discord-message-delete.service"
-const serviceUsage = "usage: discord-message-delete {start|stop|restart|reload|status|enable|disable|logs}\n       discord-message-delete rule {add|delete} <regex>"
+const serviceUsage = "usage: discord-message-delete {start|stop|restart|reload|status|enable|disable|logs}\n       discord-message-delete rule {add|delete} <regex>\n       discord-message-delete rule {add|delete} emoji <emoji>"
+
+type ruleCommand struct {
+	action string
+	kind   string
+	value  string
+}
+
+type reactionRemover func(channelID string, messageID string, emoji string) error
 
 func newCleanerStore(cleaner *bot.Cleaner) *cleanerStore {
 	store := &cleanerStore{}
@@ -105,6 +113,17 @@ func main() {
 	session.AddHandler(func(s *discordgo.Session, message *discordgo.MessageUpdate) {
 		handleMessage(s, message.Message, "update", me.ID, activeCleaner, logger)
 	})
+	session.AddHandler(func(s *discordgo.Session, reaction *discordgo.MessageReactionAdd) {
+		handleReaction(
+			func(channelID string, messageID string, emoji string) error {
+				return s.MessageReactionsRemoveEmoji(channelID, messageID, emoji)
+			},
+			reaction,
+			me.ID,
+			activeCleaner,
+			logger,
+		)
+	})
 
 	if err := session.Open(); err != nil {
 		logger.Fatalf("open Discord session: %v", err)
@@ -119,6 +138,7 @@ func main() {
 func gatewayIntents() discordgo.Intent {
 	return discordgo.IntentsGuilds |
 		discordgo.IntentsGuildMessages |
+		discordgo.IntentsGuildMessageReactions |
 		discordgo.IntentsMessageContent
 }
 
@@ -152,7 +172,7 @@ func runServiceCommand(args []string) (bool, int) {
 }
 
 func runRuleCommand(args []string) int {
-	action, pattern, err := parseRuleCommand(args)
+	command, err := parseRuleCommand(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -164,39 +184,46 @@ func runRuleCommand(args []string) int {
 	}
 	added := false
 	removed := 0
-	switch action {
-	case "add":
-		added, err = bot.AddRegexRule(configPath, pattern)
-	case "delete":
-		removed, err = bot.RemoveRegexRule(configPath, pattern)
+	switch {
+	case command.action == "add" && command.kind == "regex":
+		added, err = bot.AddRegexRule(configPath, command.value)
+	case command.action == "delete" && command.kind == "regex":
+		removed, err = bot.RemoveRegexRule(configPath, command.value)
+	case command.action == "add" && command.kind == "emoji":
+		added, err = bot.AddEmojiRule(configPath, command.value)
+	case command.action == "delete" && command.kind == "emoji":
+		removed, err = bot.RemoveEmojiRule(configPath, command.value)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s rule: %v\n", action, err)
+		fmt.Fprintf(os.Stderr, "%s %s rule: %v\n", command.action, command.kind, err)
 		return 1
 	}
 	if exitCode := runCommand("systemctl", "--user", "restart", serviceName); exitCode != 0 {
 		fmt.Fprintln(os.Stderr, "the rules were saved, but the running service could not restart")
 		return exitCode
 	}
-	if action == "add" && !added {
-		fmt.Printf("rule %q already exists; rules normalized and service restarted\n", pattern)
-	} else if action == "delete" && removed > 1 {
-		fmt.Printf("deleted rule %q (%d matching entries) and restarted service\n", pattern, removed)
+	if command.action == "add" && !added {
+		fmt.Printf("%s rule %q already exists; rules normalized and service restarted\n", command.kind, command.value)
+	} else if command.action == "delete" && removed > 1 {
+		fmt.Printf("deleted %s rule %q (%d matching entries) and restarted service\n", command.kind, command.value, removed)
 	} else {
 		pastTense := "added"
-		if action == "delete" {
+		if command.action == "delete" {
 			pastTense = "deleted"
 		}
-		fmt.Printf("%s rule %q and restarted service\n", pastTense, pattern)
+		fmt.Printf("%s %s rule %q and restarted service\n", pastTense, command.kind, command.value)
 	}
 	return 0
 }
 
-func parseRuleCommand(args []string) (string, string, error) {
-	if len(args) != 2 || (args[0] != "add" && args[0] != "delete") || args[1] == "" {
-		return "", "", errors.New("usage: discord-message-delete rule {add|delete} <regex>")
+func parseRuleCommand(args []string) (ruleCommand, error) {
+	if len(args) == 2 && (args[0] == "add" || args[0] == "delete") && args[1] != "" {
+		return ruleCommand{action: args[0], kind: "regex", value: args[1]}, nil
 	}
-	return args[0], args[1], nil
+	if len(args) == 3 && (args[0] == "add" || args[0] == "delete") && args[1] == "emoji" && args[2] != "" {
+		return ruleCommand{action: args[0], kind: "emoji", value: args[2]}, nil
+	}
+	return ruleCommand{}, errors.New("usage: discord-message-delete rule {add|delete} <regex>\n       discord-message-delete rule {add|delete} emoji <emoji>")
 }
 
 func activeConfigPath() (string, error) {
@@ -334,6 +361,9 @@ func handleMessage(
 	}
 
 	decision := cleaner.Decide(messageFromDiscord(message))
+	if decision.EmojiCheck != nil && decision.EmojiCheck.RulesLoaded > 0 {
+		logEmojiCheck(logger, event, decision)
+	}
 	if decision.MessageCheck != nil {
 		logMessageCheck(logger, event, decision)
 	}
@@ -349,6 +379,52 @@ func handleMessage(
 		return
 	}
 	logger.Printf("delete succeeded event=%s rule=%s", event, decision.Kind)
+}
+
+func logEmojiCheck(logger *log.Logger, event string, decision bot.Decision) {
+	check := decision.EmojiCheck
+	logger.Printf(
+		"emoji check event=%s rules_loaded=%d searchable_text=%t matched=%t delete=%t",
+		event,
+		check.RulesLoaded,
+		check.SearchableText,
+		check.Matched,
+		decision.Delete && decision.Kind == bot.DecisionEmoji,
+	)
+}
+
+func handleReaction(
+	remove reactionRemover,
+	reaction *discordgo.MessageReactionAdd,
+	botUserID string,
+	activeCleaner *cleanerStore,
+	logger *log.Logger,
+) {
+	if reaction == nil || reaction.MessageReaction == nil || reaction.UserID == botUserID {
+		return
+	}
+	cleaner := activeCleaner.get()
+	if cleaner == nil {
+		logger.Print("no active cleaner configured")
+		return
+	}
+	decision := cleaner.DecideReaction(bot.ReactionEmoji{
+		ID:   reaction.Emoji.ID,
+		Name: reaction.Emoji.Name,
+	})
+	if !decision.Remove {
+		return
+	}
+	apiName := reaction.Emoji.APIName()
+	if apiName == "" {
+		logger.Printf("reaction remove skipped rules_loaded=%d reason=missing_emoji_name", decision.RulesLoaded)
+		return
+	}
+	if err := remove(reaction.ChannelID, reaction.MessageID, apiName); err != nil {
+		logReactionRemoveFailure(logger, decision.RulesLoaded, err)
+		return
+	}
+	logger.Printf("reaction remove succeeded rules_loaded=%d", decision.RulesLoaded)
 }
 
 func logMessageCheck(logger *log.Logger, event string, decision bot.Decision) {
@@ -401,6 +477,26 @@ func logDeleteFailure(logger *log.Logger, event string, kind bot.DecisionKind, e
 		return
 	}
 	logger.Printf("delete failed event=%s rule=%s error_type=%T", event, kind, err)
+}
+
+func logReactionRemoveFailure(logger *log.Logger, rulesLoaded int, err error) {
+	var restError *discordgo.RESTError
+	if errors.As(err, &restError) {
+		httpStatus := 0
+		if restError.Response != nil {
+			httpStatus = restError.Response.StatusCode
+		}
+		discordCode := 0
+		if restError.Message != nil {
+			discordCode = restError.Message.Code
+		}
+		logger.Printf(
+			"reaction remove failed rules_loaded=%d http_status=%d discord_code=%d",
+			rulesLoaded, httpStatus, discordCode,
+		)
+		return
+	}
+	logger.Printf("reaction remove failed rules_loaded=%d error_type=%T", rulesLoaded, err)
 }
 
 func messageFromDiscord(message *discordgo.Message) bot.Message {
