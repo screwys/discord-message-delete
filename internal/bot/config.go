@@ -18,6 +18,7 @@ import (
 var (
 	customEmojiPattern       = regexp.MustCompile(`^<(?:a)?:([A-Za-z0-9_~]{2,32}):([0-9]+)>$`)
 	customEmojiInTextPattern = regexp.MustCompile(`<(?:a)?:([A-Za-z0-9_~]{2,32}):([0-9]+)>`)
+	customEmojiNamePattern   = regexp.MustCompile(`^:([A-Za-z0-9_~]{2,32}):$`)
 	emojiCodeMap             = emoji.CodeMap()
 	emojiReverseCodeMap      = emoji.RevCodeMap()
 )
@@ -48,8 +49,9 @@ type RegexRule struct {
 }
 
 type EmojiRule struct {
-	Unicode  string
-	CustomID string
+	Unicode    string
+	CustomID   string
+	CustomName string
 }
 
 func LoadConfig(path string) (*CompiledConfig, error) {
@@ -337,7 +339,10 @@ func canonicalEmoji(value string) (string, error) {
 	if _, exists := emojiReverseCodeMap[value]; exists {
 		return value, nil
 	}
-	return "", errors.New("use a supported :shortcode:, a Unicode emoji, or a custom emoji mention")
+	if customEmojiNamePattern.MatchString(value) {
+		return value, nil
+	}
+	return "", errors.New("use an :emoji_name:, a Unicode emoji, or a custom emoji mention")
 }
 
 func containsEmoji(values []string, value string) bool {
@@ -353,6 +358,9 @@ func containsEmoji(values []string, value string) bool {
 func emojiIdentity(value string) string {
 	if match := customEmojiPattern.FindStringSubmatch(value); len(match) != 0 {
 		return "custom:" + match[2]
+	}
+	if match := customEmojiNamePattern.FindStringSubmatch(value); len(match) != 0 {
+		return "custom-name:" + match[1]
 	}
 	return "unicode:" + value
 }
@@ -662,6 +670,11 @@ func CompileConfig(config Config) (*CompiledConfig, error) {
 		match := customEmojiPattern.FindStringSubmatch(value)
 		if len(match) != 0 {
 			emojiRules = append(emojiRules, EmojiRule{CustomID: match[2]})
+			continue
+		}
+		match = customEmojiNamePattern.FindStringSubmatch(value)
+		if len(match) != 0 {
+			emojiRules = append(emojiRules, EmojiRule{CustomName: match[1]})
 			continue
 		}
 		emojiRules = append(emojiRules, EmojiRule{Unicode: value})

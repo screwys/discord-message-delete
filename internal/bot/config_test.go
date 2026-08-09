@@ -414,7 +414,30 @@ func TestEmojiRuleAcceptsCustomEmojiAndDeletesBySameIdentity(t *testing.T) {
 	}
 }
 
-func TestAddEmojiRuleRejectsUnknownShortcodeWithoutChangingConfig(t *testing.T) {
+func TestAddEmojiRuleAcceptsCustomEmojiName(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": []
+}
+`)
+	added, err := AddEmojiRule(path, ":server_spade:")
+	if err != nil {
+		t.Fatalf("AddEmojiRule: %v", err)
+	}
+	if !added {
+		t.Fatal("added = false, want true")
+	}
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	if len(config.EmojiRules) != 1 || config.EmojiRules[0] != ":server_spade:" {
+		t.Fatalf("EmojiRules = %q, want [:server_spade:]", config.EmojiRules)
+	}
+}
+
+func TestAddEmojiRuleRejectsInvalidValueWithoutChangingConfig(t *testing.T) {
 	path := writeTestConfig(t, `{
   "spoiler_image_user_id": "",
   "ignored_user_ids": [],
@@ -426,8 +449,8 @@ func TestAddEmojiRuleRejectsUnknownShortcodeWithoutChangingConfig(t *testing.T) 
 		t.Fatalf("os.ReadFile: %v", err)
 	}
 
-	if _, err := AddEmojiRule(path, ":not_a_known_emoji:"); err == nil {
-		t.Fatal("AddEmojiRule returned nil error for unknown shortcode")
+	if _, err := AddEmojiRule(path, "not an emoji"); err == nil {
+		t.Fatal("AddEmojiRule returned nil error for invalid value")
 	}
 	after, err := os.ReadFile(path)
 	if err != nil {

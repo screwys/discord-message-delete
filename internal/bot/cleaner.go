@@ -189,7 +189,7 @@ func (rule EmojiRule) matchesText(text string) bool {
 		return containsExactEmoji(text, rule.Unicode)
 	}
 	for _, match := range customEmojiInTextPattern.FindAllStringSubmatch(text, -1) {
-		if len(match) > 2 && match[2] == rule.CustomID {
+		if len(match) > 2 && (match[2] == rule.CustomID || match[1] == rule.CustomName) {
 			return true
 		}
 	}
@@ -233,6 +233,9 @@ func isEmojiModifier(char rune) bool {
 func (rule EmojiRule) matchesReaction(reaction ReactionEmoji) bool {
 	if rule.CustomID != "" {
 		return reaction.ID == rule.CustomID
+	}
+	if rule.CustomName != "" {
+		return reaction.ID != "" && reaction.Name == rule.CustomName
 	}
 	return reaction.ID == "" && reaction.Name == rule.Unicode
 }

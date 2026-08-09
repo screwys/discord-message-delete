@@ -310,6 +310,25 @@ func TestCustomEmojiRuleMatchesMessageByEmojiID(t *testing.T) {
 	}
 }
 
+func TestCustomEmojiNameRuleMatchesMessageAndReaction(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{EmojiRules: []string{":server_spade:"}})
+
+	message := cleaner.Decide(Message{
+		AuthorID: "member",
+		Content:  "<a:server_spade:123456789012345678>",
+	})
+	if !message.Delete || message.Kind != DecisionEmoji {
+		t.Fatalf("message decision = %+v, want custom emoji deletion", message)
+	}
+	reaction := cleaner.DecideReaction(ReactionEmoji{
+		ID:   "123456789012345678",
+		Name: "server_spade",
+	})
+	if !reaction.Remove {
+		t.Fatalf("reaction decision = %+v, want removal", reaction)
+	}
+}
+
 func TestEmojiRuleMatchesNewReactionsWithoutMessageHistory(t *testing.T) {
 	cleaner := newTestCleaner(t, Config{
 		EmojiRules: []string{":thumbsup:", "<:party:123456789012345678>"},
