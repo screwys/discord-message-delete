@@ -39,13 +39,19 @@ func TestReadyLogContainsOnlyGuildCount(t *testing.T) {
 	}
 }
 
-func TestGatewayIntentsCoverGuildMessagesAndContent(t *testing.T) {
+func TestConfigureGatewayUsesRequiredIntentsAndInvisiblePresence(t *testing.T) {
+	var identify discordgo.Identify
+	configureGateway(&identify)
+
 	want := discordgo.IntentsGuilds |
 		discordgo.IntentsGuildMessages |
 		discordgo.IntentsGuildMessageReactions |
 		discordgo.IntentsMessageContent
-	if gatewayIntents() != want {
-		t.Fatalf("gatewayIntents() = %d, want %d", gatewayIntents(), want)
+	if identify.Intents != want {
+		t.Fatalf("Intents = %d, want %d", identify.Intents, want)
+	}
+	if identify.Presence.Status != string(discordgo.StatusInvisible) {
+		t.Fatalf("Presence.Status = %q, want %q", identify.Presence.Status, discordgo.StatusInvisible)
 	}
 }
 

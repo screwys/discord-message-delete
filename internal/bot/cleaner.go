@@ -114,7 +114,7 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 	}
 	emojiCheck := &EmojiCheck{
 		RulesLoaded:    len(cleaner.config.EmojiRules),
-		SearchableText: searchText != "",
+		SearchableText: message.Content != "",
 	}
 	if _, ignored := cleaner.config.IgnoredUserIDs[message.AuthorID]; ignored {
 		messageCheck.Ignored = true
@@ -136,7 +136,7 @@ func (cleaner *Cleaner) Decide(message Message) Decision {
 	}
 
 	for _, rule := range cleaner.config.EmojiRules {
-		if rule.matchesText(searchText) {
+		if rule.matchesText(message.Content) {
 			emojiCheck.Matched = true
 			return Decision{
 				Delete:       true,

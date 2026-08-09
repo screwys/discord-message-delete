@@ -94,7 +94,7 @@ func main() {
 	if err != nil {
 		logger.Fatalf("create Discord session: %v", err)
 	}
-	session.Identify.Intents = gatewayIntents()
+	configureGateway(&session.Identify)
 
 	me, err := session.User("@me")
 	if err != nil {
@@ -135,11 +135,12 @@ func main() {
 	logger.Print("shutting down")
 }
 
-func gatewayIntents() discordgo.Intent {
-	return discordgo.IntentsGuilds |
+func configureGateway(identify *discordgo.Identify) {
+	identify.Intents = discordgo.IntentsGuilds |
 		discordgo.IntentsGuildMessages |
 		discordgo.IntentsGuildMessageReactions |
 		discordgo.IntentsMessageContent
+	identify.Presence.Status = string(discordgo.StatusInvisible)
 }
 
 func logReady(logger *log.Logger, ready *discordgo.Ready) {

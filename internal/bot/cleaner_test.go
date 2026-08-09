@@ -271,6 +271,24 @@ func TestEmojiRuleDeletesMessageContainingConfiguredEmoji(t *testing.T) {
 	}
 }
 
+func TestEmojiRuleIgnoresEmbedMetadata(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{EmojiRules: []string{":thumbsup:"}})
+
+	decision := cleaner.Decide(Message{
+		AuthorID: "member",
+		Content:  "https://example.invalid/item",
+		Embeds: []Embed{{
+			Description: "decorative preview 👍",
+		}},
+	})
+	if decision.Delete {
+		t.Fatalf("Delete = true, want false")
+	}
+	if decision.EmojiCheck == nil || decision.EmojiCheck.Matched {
+		t.Fatalf("EmojiCheck = %+v, want an unmatched content-only check", decision.EmojiCheck)
+	}
+}
+
 func TestEmojiRuleDoesNotMatchDifferentEmoji(t *testing.T) {
 	cleaner := newTestCleaner(t, Config{EmojiRules: []string{":thumbsup:"}})
 
