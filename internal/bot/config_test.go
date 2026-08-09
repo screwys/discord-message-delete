@@ -421,7 +421,7 @@ func TestAddEmojiRuleAcceptsCustomEmojiName(t *testing.T) {
   "message_regexes": []
 }
 `)
-	added, err := AddEmojiRule(path, ":server_spade:")
+	added, err := AddEmojiRule(path, ":team_badge:")
 	if err != nil {
 		t.Fatalf("AddEmojiRule: %v", err)
 	}
@@ -432,8 +432,8 @@ func TestAddEmojiRuleAcceptsCustomEmojiName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readConfig: %v", err)
 	}
-	if len(config.EmojiRules) != 1 || config.EmojiRules[0] != ":server_spade:" {
-		t.Fatalf("EmojiRules = %q, want [:server_spade:]", config.EmojiRules)
+	if len(config.EmojiRules) != 1 || config.EmojiRules[0] != ":team_badge:" {
+		t.Fatalf("EmojiRules = %q, want [:team_badge:]", config.EmojiRules)
 	}
 }
 

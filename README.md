@@ -43,7 +43,7 @@ To get a Discord user ID, enable **User Settings > Advanced > Developer Mode**, 
 
 Regex rules are matched case-insensitively against message content and embed metadata such as title, description, author, provider, footer, fields, and URLs. Each rule is checked against both the original text and a Unicode confusable-folded copy, with invisible formatting characters removed from the folded copy.
 
-Emoji rules accept a standard shortcode such as `:thumbsup:`, a custom emoji name such as `:server_spade:`, the Unicode emoji itself, or a custom emoji mention copied from Discord such as `<:party:123456789012345678>`. Known standard shortcodes are stored as Unicode. Other shortcode names match custom emoji by name; custom mentions match by ID, which remains stable if the emoji is renamed.
+Emoji rules accept a standard shortcode such as `:thumbsup:`, a custom emoji name such as `:team_badge:`, the Unicode emoji itself, or a custom emoji mention copied from Discord such as `<:party:123456789012345678>`. Known standard shortcodes are stored as Unicode. Other shortcode names match custom emoji by name; custom mentions match by ID, which remains stable if the emoji is renamed.
 
 `config.json` and `.env` are ignored by Git so tokens and server-specific settings do not get pushed to a public repo.
 
@@ -94,7 +94,7 @@ Add or delete an emoji rule:
 
 ```sh
 discord-message-delete rule add emoji :thumbsup:
-discord-message-delete rule add emoji :server_spade:
+discord-message-delete rule add emoji :team_badge:
 discord-message-delete rule add emoji '👍'
 discord-message-delete rule add emoji '<:party:123456789012345678>'
 discord-message-delete rule delete emoji :thumbsup:
