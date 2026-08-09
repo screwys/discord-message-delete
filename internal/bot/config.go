@@ -37,20 +37,73 @@ func LoadConfig(path string) (*CompiledConfig, error) {
 	return CompileConfig(config)
 }
 
-func AppendRegexRule(path string, pattern string) error {
+func AddRegexRule(path string, pattern string) (bool, error) {
 	config, err := readConfig(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	config.MessageRegexes = append(config.MessageRegexes, RegexRuleConfig{
-		Name:    pattern,
-		Pattern: pattern,
-	})
-	if _, err := CompileConfig(config); err != nil {
-		return err
+	config.MessageRegexes, _ = deduplicateRegexRules(config.MessageRegexes)
+	added := !containsRegexRule(config.MessageRegexes, pattern)
+	if added {
+		config.MessageRegexes = append(config.MessageRegexes, RegexRuleConfig{
+			Name:    pattern,
+			Pattern: pattern,
+		})
 	}
-	return writeConfig(path, config)
+	if _, err := CompileConfig(config); err != nil {
+		return false, err
+	}
+	return added, writeConfig(path, config)
+}
+
+func RemoveRegexRule(path string, pattern string) (int, error) {
+	config, err := readConfig(path)
+	if err != nil {
+		return 0, err
+	}
+
+	rules := make([]RegexRuleConfig, 0, len(config.MessageRegexes))
+	removed := 0
+	for _, rule := range config.MessageRegexes {
+		if rule.Pattern == pattern {
+			removed++
+			continue
+		}
+		rules = append(rules, rule)
+	}
+	if removed == 0 {
+		return 0, fmt.Errorf("rule %q was not found", pattern)
+	}
+	config.MessageRegexes, _ = deduplicateRegexRules(rules)
+	if _, err := CompileConfig(config); err != nil {
+		return 0, err
+	}
+	return removed, writeConfig(path, config)
+}
+
+func deduplicateRegexRules(rules []RegexRuleConfig) ([]RegexRuleConfig, int) {
+	unique := make([]RegexRuleConfig, 0, len(rules))
+	seen := make(map[string]struct{}, len(rules))
+	removed := 0
+	for _, rule := range rules {
+		if _, exists := seen[rule.Pattern]; exists {
+			removed++
+			continue
+		}
+		seen[rule.Pattern] = struct{}{}
+		unique = append(unique, rule)
+	}
+	return unique, removed
+}
+
+func containsRegexRule(rules []RegexRuleConfig, pattern string) bool {
+	for _, rule := range rules {
+		if rule.Pattern == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 func readConfig(path string) (Config, error) {

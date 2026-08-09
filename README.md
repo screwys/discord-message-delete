@@ -80,14 +80,15 @@ discord-message-delete restart
 discord-message-delete logs
 ```
 
-Add a case-insensitive regex to the active ruleset:
+Add or delete a case-insensitive regex from the active ruleset:
 
 ```sh
 discord-message-delete rule add example
 discord-message-delete rule add '\bblocked phrase\b'
+discord-message-delete rule delete example
 ```
 
-The command validates the regex, appends it to `message_regexes` in `config.json`, preserves the other settings, and reloads the running service immediately. Quote patterns that contain spaces or shell metacharacters.
+The command parses and validates the complete configuration, deduplicates `message_regexes` by exact pattern, preserves the other settings, and atomically writes properly formatted JSON. After a successful change it restarts the service so the saved rules and running process cannot diverge. Deletion matches the exact regex string. Quote patterns that contain spaces or shell metacharacters.
 
 View logs:
 

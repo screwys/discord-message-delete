@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestAppendRegexRulePreservesConfigAndAppendsRule(t *testing.T) {
+func TestAddRegexRulePreservesConfigAndAppendsRule(t *testing.T) {
 	path := writeTestConfig(t, `{
   "spoiler_image_user_id": "target-user",
   "ignored_user_ids": ["ignored-user"],
@@ -14,8 +14,12 @@ func TestAppendRegexRulePreservesConfigAndAppendsRule(t *testing.T) {
 }
 `)
 
-	if err := AppendRegexRule(path, "example"); err != nil {
-		t.Fatalf("AppendRegexRule: %v", err)
+	added, err := AddRegexRule(path, "example")
+	if err != nil {
+		t.Fatalf("AddRegexRule: %v", err)
+	}
+	if !added {
+		t.Fatal("added = false, want true")
 	}
 
 	config, err := readConfig(path)
@@ -31,9 +35,9 @@ func TestAppendRegexRulePreservesConfigAndAppendsRule(t *testing.T) {
 	if len(config.MessageRegexes) != 2 {
 		t.Fatalf("len(MessageRegexes) = %d, want 2", len(config.MessageRegexes))
 	}
-	added := config.MessageRegexes[1]
-	if added.Name != "example" || added.Pattern != "example" {
-		t.Fatalf("added rule = %+v, want name and pattern example", added)
+	addedRule := config.MessageRegexes[1]
+	if addedRule.Name != "example" || addedRule.Pattern != "example" {
+		t.Fatalf("added rule = %+v, want name and pattern example", addedRule)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -44,7 +48,7 @@ func TestAppendRegexRulePreservesConfigAndAppendsRule(t *testing.T) {
 	}
 }
 
-func TestAppendRegexRuleKeepsRepeatedAddsReloadable(t *testing.T) {
+func TestAddRegexRuleDeduplicatesRepeatedAdds(t *testing.T) {
 	path := writeTestConfig(t, `{
   "spoiler_image_user_id": "",
   "ignored_user_ids": [],
@@ -52,9 +56,13 @@ func TestAppendRegexRuleKeepsRepeatedAddsReloadable(t *testing.T) {
 }
 `)
 
-	for _, pattern := range []string{"first", "second", "third"} {
-		if err := AppendRegexRule(path, pattern); err != nil {
-			t.Fatalf("AppendRegexRule(%q): %v", pattern, err)
+	for index, pattern := range []string{"first", "second", "first", "third"} {
+		added, err := AddRegexRule(path, pattern)
+		if err != nil {
+			t.Fatalf("AddRegexRule(%q): %v", pattern, err)
+		}
+		if added != (index != 2) {
+			t.Fatalf("AddRegexRule(%q) added = %t at index %d", pattern, added, index)
 		}
 	}
 
@@ -70,7 +78,7 @@ func TestAppendRegexRuleKeepsRepeatedAddsReloadable(t *testing.T) {
 	}
 }
 
-func TestAppendRegexRuleRejectsInvalidPatternWithoutChangingConfig(t *testing.T) {
+func TestAddRegexRuleRejectsInvalidPatternWithoutChangingConfig(t *testing.T) {
 	path := writeTestConfig(t, `{
   "spoiler_image_user_id": "",
   "ignored_user_ids": [],
@@ -82,8 +90,8 @@ func TestAppendRegexRuleRejectsInvalidPatternWithoutChangingConfig(t *testing.T)
 		t.Fatalf("os.ReadFile: %v", err)
 	}
 
-	if err := AppendRegexRule(path, "["); err == nil {
-		t.Fatal("AppendRegexRule returned nil error for invalid regex")
+	if _, err := AddRegexRule(path, "["); err == nil {
+		t.Fatal("AddRegexRule returned nil error for invalid regex")
 	}
 	after, err := os.ReadFile(path)
 	if err != nil {
@@ -91,6 +99,90 @@ func TestAppendRegexRuleRejectsInvalidPatternWithoutChangingConfig(t *testing.T)
 	}
 	if string(after) != string(original) {
 		t.Fatal("invalid rule changed config")
+	}
+}
+
+func TestAddRegexRuleNormalizesExistingDuplicates(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [
+    {"name": "first name", "pattern": "same"},
+    {"name": "duplicate name", "pattern": "same"},
+    {"name": "other", "pattern": "other"}
+  ]
+}
+`)
+
+	added, err := AddRegexRule(path, "same")
+	if err != nil {
+		t.Fatalf("AddRegexRule: %v", err)
+	}
+	if added {
+		t.Fatal("added = true, want false")
+	}
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	if len(config.MessageRegexes) != 2 {
+		t.Fatalf("len(MessageRegexes) = %d, want 2", len(config.MessageRegexes))
+	}
+	if config.MessageRegexes[0].Name != "first name" {
+		t.Fatalf("first rule name = %q, want first name", config.MessageRegexes[0].Name)
+	}
+}
+
+func TestRemoveRegexRuleRemovesEveryMatchAndDeduplicatesRemainingRules(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [
+    {"name": "remove", "pattern": "remove"},
+    {"name": "keep", "pattern": "keep"},
+    {"name": "remove again", "pattern": "remove"},
+    {"name": "keep again", "pattern": "keep"}
+  ]
+}
+`)
+
+	removed, err := RemoveRegexRule(path, "remove")
+	if err != nil {
+		t.Fatalf("RemoveRegexRule: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("removed = %d, want 2", removed)
+	}
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	if len(config.MessageRegexes) != 1 || config.MessageRegexes[0].Pattern != "keep" {
+		t.Fatalf("MessageRegexes = %+v, want one keep rule", config.MessageRegexes)
+	}
+}
+
+func TestRemoveRegexRuleLeavesConfigUnchangedWhenRuleIsMissing(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [{"name": "keep", "pattern": "keep"}]
+}
+`)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile: %v", err)
+	}
+
+	if _, err := RemoveRegexRule(path, "missing"); err == nil {
+		t.Fatal("RemoveRegexRule returned nil error for a missing rule")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile: %v", err)
+	}
+	if string(after) != string(original) {
+		t.Fatal("missing removal changed config")
 	}
 }
 

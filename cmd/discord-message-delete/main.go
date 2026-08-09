@@ -28,7 +28,7 @@ type cleanerStore struct {
 const discordAttachmentFlagSpoiler discordgo.MessageAttachmentFlags = 1 << 3
 
 const serviceName = "discord-message-delete.service"
-const serviceUsage = "usage: discord-message-delete {start|stop|restart|reload|status|enable|disable|logs}\n       discord-message-delete rule add <regex>"
+const serviceUsage = "usage: discord-message-delete {start|stop|restart|reload|status|enable|disable|logs}\n       discord-message-delete rule {add|delete} <regex>"
 
 func newCleanerStore(cleaner *bot.Cleaner) *cleanerStore {
 	store := &cleanerStore{}
@@ -152,7 +152,7 @@ func runServiceCommand(args []string) (bool, int) {
 }
 
 func runRuleCommand(args []string) int {
-	pattern, err := ruleToAdd(args)
+	action, pattern, err := parseRuleCommand(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -162,23 +162,41 @@ func runRuleCommand(args []string) int {
 		fmt.Fprintf(os.Stderr, "find active config: %v\n", err)
 		return 1
 	}
-	if err := bot.AppendRegexRule(configPath, pattern); err != nil {
-		fmt.Fprintf(os.Stderr, "add rule: %v\n", err)
+	added := false
+	removed := 0
+	switch action {
+	case "add":
+		added, err = bot.AddRegexRule(configPath, pattern)
+	case "delete":
+		removed, err = bot.RemoveRegexRule(configPath, pattern)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s rule: %v\n", action, err)
 		return 1
 	}
-	if exitCode := runCommand("systemctl", "--user", "reload", serviceName); exitCode != 0 {
-		fmt.Fprintln(os.Stderr, "the rule was saved, but the running service could not reload it")
+	if exitCode := runCommand("systemctl", "--user", "restart", serviceName); exitCode != 0 {
+		fmt.Fprintln(os.Stderr, "the rules were saved, but the running service could not restart")
 		return exitCode
 	}
-	fmt.Printf("added rule %q\n", pattern)
+	if action == "add" && !added {
+		fmt.Printf("rule %q already exists; rules normalized and service restarted\n", pattern)
+	} else if action == "delete" && removed > 1 {
+		fmt.Printf("deleted rule %q (%d matching entries) and restarted service\n", pattern, removed)
+	} else {
+		pastTense := "added"
+		if action == "delete" {
+			pastTense = "deleted"
+		}
+		fmt.Printf("%s rule %q and restarted service\n", pastTense, pattern)
+	}
 	return 0
 }
 
-func ruleToAdd(args []string) (string, error) {
-	if len(args) != 2 || args[0] != "add" || args[1] == "" {
-		return "", errors.New("usage: discord-message-delete rule add <regex>")
+func parseRuleCommand(args []string) (string, string, error) {
+	if len(args) != 2 || (args[0] != "add" && args[0] != "delete") || args[1] == "" {
+		return "", "", errors.New("usage: discord-message-delete rule {add|delete} <regex>")
 	}
-	return args[1], nil
+	return args[0], args[1], nil
 }
 
 func activeConfigPath() (string, error) {

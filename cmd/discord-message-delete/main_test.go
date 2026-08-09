@@ -195,18 +195,26 @@ func TestServiceCommandLeavesBotFlagsAlone(t *testing.T) {
 	}
 }
 
-func TestRuleToAddAcceptsOneRegex(t *testing.T) {
-	pattern, err := ruleToAdd([]string{"add", `\bexample\b`})
+func TestParseRuleCommandAcceptsAddAndDelete(t *testing.T) {
+	action, pattern, err := parseRuleCommand([]string{"add", `\bexample\b`})
 	if err != nil {
-		t.Fatalf("ruleToAdd: %v", err)
+		t.Fatalf("parseRuleCommand add: %v", err)
 	}
-	if pattern != `\bexample\b` {
-		t.Fatalf("pattern = %q, want \\bexample\\b", pattern)
+	if action != "add" || pattern != `\bexample\b` {
+		t.Fatalf("action, pattern = %q, %q, want add, \\bexample\\b", action, pattern)
+	}
+
+	action, pattern, err = parseRuleCommand([]string{"delete", `\bexample\b`})
+	if err != nil {
+		t.Fatalf("parseRuleCommand delete: %v", err)
+	}
+	if action != "delete" || pattern != `\bexample\b` {
+		t.Fatalf("action, pattern = %q, %q, want delete, \\bexample\\b", action, pattern)
 	}
 }
 
-func TestRuleToAddRejectsMissingRegex(t *testing.T) {
-	if _, err := ruleToAdd([]string{"add"}); err == nil {
-		t.Fatal("ruleToAdd returned nil error for missing regex")
+func TestParseRuleCommandRejectsMissingRegex(t *testing.T) {
+	if _, _, err := parseRuleCommand([]string{"add"}); err == nil {
+		t.Fatal("parseRuleCommand returned nil error for missing regex")
 	}
 }
