@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"regexp/syntax"
 	"strings"
+	"unicode"
 
 	"github.com/kyokomi/emoji/v2"
 )
@@ -18,6 +21,8 @@ var (
 	emojiCodeMap             = emoji.CodeMap()
 	emojiReverseCodeMap      = emoji.RevCodeMap()
 )
+
+const blockedWordsRuleName = "blocked words"
 
 type Config struct {
 	SpoilerImageUserID string            `json:"spoiler_image_user_id"`
@@ -55,19 +60,49 @@ func LoadConfig(path string) (*CompiledConfig, error) {
 	return CompileConfig(config)
 }
 
+func NormalizeConfig(path string) (bool, error) {
+	config, err := readConfig(path)
+	if err != nil {
+		return false, err
+	}
+	original := config
+	config.MessageRegexes, err = canonicalizeRegexRules(config.MessageRegexes)
+	if err != nil {
+		return false, err
+	}
+	config.EmojiRules, _, err = canonicalizeEmojiRules(config.EmojiRules)
+	if err != nil {
+		return false, err
+	}
+	if _, err := CompileConfig(config); err != nil {
+		return false, err
+	}
+	if reflect.DeepEqual(config, original) {
+		return false, nil
+	}
+	return true, writeConfig(path, config)
+}
+
 func AddRegexRule(path string, pattern string) (bool, error) {
 	config, err := readConfig(path)
 	if err != nil {
 		return false, err
 	}
 
-	config.MessageRegexes, _ = deduplicateRegexRules(config.MessageRegexes)
-	added := !containsRegexRule(config.MessageRegexes, pattern)
+	expanded, err := expandBlockedWords(config.MessageRegexes)
+	if err != nil {
+		return false, err
+	}
+	added := !containsManagedRegexRule(expanded, pattern)
 	if added {
-		config.MessageRegexes = append(config.MessageRegexes, RegexRuleConfig{
+		expanded = append(expanded, RegexRuleConfig{
 			Name:    pattern,
 			Pattern: pattern,
 		})
+	}
+	config.MessageRegexes, err = canonicalizeRegexRules(expanded)
+	if err != nil {
+		return false, err
 	}
 	if _, err := CompileConfig(config); err != nil {
 		return false, err
@@ -81,10 +116,27 @@ func RemoveRegexRule(path string, pattern string) (int, error) {
 		return 0, err
 	}
 
-	rules := make([]RegexRuleConfig, 0, len(config.MessageRegexes))
 	removed := 0
-	for _, rule := range config.MessageRegexes {
-		if rule.Pattern == pattern {
+	for index := range config.MessageRegexes {
+		rule := &config.MessageRegexes[index]
+		if rule.Name != blockedWordsRuleName {
+			continue
+		}
+		updated, matches := removeWordFromBlockedPattern(rule.Pattern, pattern)
+		if matches > 0 {
+			rule.Pattern = updated
+			removed += matches
+		}
+	}
+	config.MessageRegexes = slicesWithoutEmptyPatterns(config.MessageRegexes)
+
+	expanded, err := expandBlockedWords(config.MessageRegexes)
+	if err != nil {
+		return 0, err
+	}
+	rules := make([]RegexRuleConfig, 0, len(expanded))
+	for _, rule := range expanded {
+		if managedRegexRulesEqual(rule, pattern) {
 			removed++
 			continue
 		}
@@ -93,11 +145,101 @@ func RemoveRegexRule(path string, pattern string) (int, error) {
 	if removed == 0 {
 		return 0, fmt.Errorf("rule %q was not found", pattern)
 	}
-	config.MessageRegexes, _ = deduplicateRegexRules(rules)
+	config.MessageRegexes, err = canonicalizeRegexRules(rules)
+	if err != nil {
+		return 0, err
+	}
 	if _, err := CompileConfig(config); err != nil {
 		return 0, err
 	}
 	return removed, writeConfig(path, config)
+}
+
+func removeWordFromBlockedPattern(pattern string, target string) (string, int) {
+	expression, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return pattern, 0
+	}
+	branches := []*syntax.Regexp{expression}
+	if expression.Op == syntax.OpAlternate {
+		branches = expression.Sub
+	}
+
+	remainingBranches := make([]string, 0, len(branches))
+	removed := 0
+	for _, branch := range branches {
+		alternatives, finite := literalRegexAlternatives(branch)
+		if !finite {
+			remainingBranches = append(remainingBranches, branch.String())
+			continue
+		}
+		remaining := make([]string, 0, len(alternatives))
+		branchRemoved := 0
+		for _, alternative := range alternatives {
+			if blockedWordsEqual(alternative, target) {
+				branchRemoved++
+				continue
+			}
+			remaining = append(remaining, alternative)
+		}
+		if branchRemoved == 0 {
+			remainingBranches = append(remainingBranches, branch.String())
+			continue
+		}
+		removed += branchRemoved
+		if len(remaining) > 0 {
+			remainingBranches = append(remainingBranches, blockedWordsPattern(remaining))
+		}
+	}
+	if removed == 0 {
+		return pattern, 0
+	}
+	if len(remainingBranches) == 0 {
+		return "", removed
+	}
+	if len(remainingBranches) == 1 {
+		return remainingBranches[0], removed
+	}
+	for index := range remainingBranches {
+		remainingBranches[index] = "(?:" + remainingBranches[index] + ")"
+	}
+	return strings.Join(remainingBranches, "|"), removed
+}
+
+func blockedWordsEqual(left string, right string) bool {
+	canonicalLeft, leftManaged := canonicalBlockedWord(left)
+	canonicalRight, rightManaged := canonicalBlockedWord(right)
+	if leftManaged && rightManaged {
+		return canonicalLeft == canonicalRight
+	}
+	return left == right
+}
+
+func blockedWordsPattern(words []string) string {
+	escaped := make([]string, 0, len(words))
+	seen := make(map[string]struct{}, len(words))
+	for _, word := range words {
+		canonical, managed := canonicalBlockedWord(word)
+		if managed {
+			word = canonical
+		}
+		if _, exists := seen[word]; exists {
+			continue
+		}
+		seen[word] = struct{}{}
+		escaped = append(escaped, regexp.QuoteMeta(word))
+	}
+	return `(?i)\b(?:` + strings.Join(escaped, "|") + `)\b`
+}
+
+func slicesWithoutEmptyPatterns(rules []RegexRuleConfig) []RegexRuleConfig {
+	kept := rules[:0]
+	for _, rule := range rules {
+		if rule.Pattern != "" {
+			kept = append(kept, rule)
+		}
+	}
+	return kept
 }
 
 func AddEmojiRule(path string, value string) (bool, error) {
@@ -159,6 +301,9 @@ func RemoveEmojiRule(path string, value string) (int, error) {
 }
 
 func canonicalizeEmojiRules(rules []string) ([]string, int, error) {
+	if rules == nil {
+		return nil, 0, nil
+	}
 	unique := make([]string, 0, len(rules))
 	seen := make(map[string]struct{}, len(rules))
 	removed := 0
@@ -212,28 +357,227 @@ func emojiIdentity(value string) string {
 	return "unicode:" + value
 }
 
-func deduplicateRegexRules(rules []RegexRuleConfig) ([]RegexRuleConfig, int) {
-	unique := make([]RegexRuleConfig, 0, len(rules))
-	seen := make(map[string]struct{}, len(rules))
-	removed := 0
-	for _, rule := range rules {
-		if _, exists := seen[rule.Pattern]; exists {
-			removed++
+func canonicalizeRegexRules(rules []RegexRuleConfig) ([]RegexRuleConfig, error) {
+	expanded, err := expandBlockedWords(rules)
+	if err != nil {
+		return nil, err
+	}
+	words := make([]string, 0, len(expanded))
+	otherRules := make([]RegexRuleConfig, 0, len(expanded))
+	customBlockedPatterns := make([]string, 0, 1)
+	seenWords := make(map[string]struct{}, len(expanded))
+	seenPatterns := make(map[string]struct{}, len(expanded))
+	for _, rule := range expanded {
+		if rule.Name == blockedWordsRuleName {
+			if _, exists := seenPatterns[rule.Pattern]; !exists {
+				seenPatterns[rule.Pattern] = struct{}{}
+				customBlockedPatterns = append(customBlockedPatterns, rule.Pattern)
+			}
 			continue
 		}
-		seen[rule.Pattern] = struct{}{}
-		unique = append(unique, rule)
+		word, managed := managedBlockedWord(rule)
+		if managed {
+			if _, exists := seenWords[word]; !exists {
+				seenWords[word] = struct{}{}
+				words = append(words, word)
+			}
+			continue
+		}
+		if _, exists := seenPatterns[rule.Pattern]; exists {
+			continue
+		}
+		seenPatterns[rule.Pattern] = struct{}{}
+		otherRules = append(otherRules, rule)
 	}
-	return unique, removed
+
+	canonical := make([]RegexRuleConfig, 0, len(otherRules)+1)
+	blockedPattern, err := combineBlockedWordPatterns(customBlockedPatterns, words)
+	if err != nil {
+		return nil, err
+	}
+	if blockedPattern != "" {
+		canonical = append(canonical, RegexRuleConfig{
+			Name:    blockedWordsRuleName,
+			Pattern: blockedPattern,
+		})
+	}
+	canonical = append(canonical, otherRules...)
+	return canonical, nil
 }
 
-func containsRegexRule(rules []RegexRuleConfig, pattern string) bool {
+func combineBlockedWordPatterns(customPatterns []string, words []string) (string, error) {
+	compiledCustom := make([]*regexp.Regexp, 0, len(customPatterns))
+	for _, pattern := range customPatterns {
+		compiled, err := regexp.Compile("(?i:" + pattern + ")")
+		if err != nil {
+			return "", errors.New("the blocked words rule is invalid")
+		}
+		compiledCustom = append(compiledCustom, compiled)
+	}
+
+	unmatchedWords := make([]string, 0, len(words))
+	for _, word := range words {
+		matched := false
+		for _, compiled := range compiledCustom {
+			if compiled.MatchString(word) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			unmatchedWords = append(unmatchedWords, word)
+		}
+	}
+	if len(customPatterns) == 0 {
+		if len(unmatchedWords) == 0 {
+			return "", nil
+		}
+		return `(?i)\b(?:` + strings.Join(unmatchedWords, "|") + `)\b`, nil
+	}
+	if len(customPatterns) == 1 && len(unmatchedWords) == 0 {
+		return customPatterns[0], nil
+	}
+
+	parts := make([]string, 0, len(customPatterns)+1)
+	for _, pattern := range customPatterns {
+		parts = append(parts, "(?:"+pattern+")")
+	}
+	if len(unmatchedWords) > 0 {
+		parts = append(parts, `(?:\b(?:`+strings.Join(unmatchedWords, "|")+`)\b)`)
+	}
+	return strings.Join(parts, "|"), nil
+}
+
+func expandBlockedWords(rules []RegexRuleConfig) ([]RegexRuleConfig, error) {
+	expanded := make([]RegexRuleConfig, 0, len(rules))
 	for _, rule := range rules {
-		if rule.Pattern == pattern {
+		if rule.Name != blockedWordsRuleName {
+			expanded = append(expanded, rule)
+			continue
+		}
+		words, ok := parseBlockedWordsPattern(rule.Pattern)
+		if !ok {
+			expanded = append(expanded, rule)
+			continue
+		}
+		for _, word := range words {
+			expanded = append(expanded, RegexRuleConfig{Name: word, Pattern: word})
+		}
+	}
+	return expanded, nil
+}
+
+func parseBlockedWordsPattern(pattern string) ([]string, bool) {
+	expression, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return nil, false
+	}
+	words, ok := literalRegexAlternatives(expression)
+	if !ok || len(words) == 0 {
+		return nil, false
+	}
+	for _, word := range words {
+		if _, ok := canonicalBlockedWord(word); !ok {
+			return nil, false
+		}
+	}
+	return words, true
+}
+
+func literalRegexAlternatives(expression *syntax.Regexp) ([]string, bool) {
+	const maxAlternatives = 4096
+	if expression == nil {
+		return nil, false
+	}
+	switch expression.Op {
+	case syntax.OpEmptyMatch, syntax.OpBeginLine, syntax.OpEndLine, syntax.OpBeginText,
+		syntax.OpEndText, syntax.OpWordBoundary, syntax.OpNoWordBoundary:
+		return []string{""}, true
+	case syntax.OpLiteral:
+		return []string{string(expression.Rune)}, true
+	case syntax.OpCapture:
+		return literalRegexAlternatives(expression.Sub[0])
+	case syntax.OpCharClass:
+		alternatives := make([]string, 0, len(expression.Rune)/2)
+		for index := 0; index < len(expression.Rune); index += 2 {
+			low, high := expression.Rune[index], expression.Rune[index+1]
+			if high-low > 16 || len(alternatives)+int(high-low)+1 > maxAlternatives {
+				return nil, false
+			}
+			for char := low; char <= high; char++ {
+				alternatives = append(alternatives, string(char))
+			}
+		}
+		return alternatives, true
+	case syntax.OpAlternate:
+		alternatives := make([]string, 0, len(expression.Sub))
+		for _, child := range expression.Sub {
+			childAlternatives, ok := literalRegexAlternatives(child)
+			if !ok || len(alternatives)+len(childAlternatives) > maxAlternatives {
+				return nil, false
+			}
+			alternatives = append(alternatives, childAlternatives...)
+		}
+		return alternatives, true
+	case syntax.OpConcat:
+		alternatives := []string{""}
+		for _, child := range expression.Sub {
+			childAlternatives, ok := literalRegexAlternatives(child)
+			if !ok || len(alternatives)*len(childAlternatives) > maxAlternatives {
+				return nil, false
+			}
+			combined := make([]string, 0, len(alternatives)*len(childAlternatives))
+			for _, prefix := range alternatives {
+				for _, suffix := range childAlternatives {
+					combined = append(combined, prefix+suffix)
+				}
+			}
+			alternatives = combined
+		}
+		return alternatives, true
+	default:
+		return nil, false
+	}
+}
+
+func managedBlockedWord(rule RegexRuleConfig) (string, bool) {
+	if rule.Name != rule.Pattern {
+		return "", false
+	}
+	return canonicalBlockedWord(rule.Pattern)
+}
+
+func canonicalBlockedWord(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	for _, char := range value {
+		if unicode.IsLetter(char) || unicode.IsNumber(char) || unicode.IsSpace(char) ||
+			strings.ContainsRune("@$_-'", char) {
+			continue
+		}
+		return "", false
+	}
+	return strings.ToLower(foldConfusableText(value)), true
+}
+
+func containsManagedRegexRule(rules []RegexRuleConfig, pattern string) bool {
+	for _, rule := range rules {
+		if managedRegexRulesEqual(rule, pattern) {
 			return true
 		}
 	}
 	return false
+}
+
+func managedRegexRulesEqual(rule RegexRuleConfig, pattern string) bool {
+	targetWord, targetManaged := canonicalBlockedWord(pattern)
+	ruleWord, ruleManaged := managedBlockedWord(rule)
+	if targetManaged && ruleManaged {
+		return targetWord == ruleWord
+	}
+	return rule.Pattern == pattern
 }
 
 func readConfig(path string) (Config, error) {

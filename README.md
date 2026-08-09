@@ -82,7 +82,7 @@ discord-message-delete restart
 discord-message-delete logs
 ```
 
-Add or delete a case-insensitive regex from the active ruleset:
+Add or delete a case-insensitive blocked word, phrase, or regex from the active ruleset:
 
 ```sh
 discord-message-delete rule add example
@@ -99,7 +99,9 @@ discord-message-delete rule add emoji '<:party:123456789012345678>'
 discord-message-delete rule delete emoji :thumbsup:
 ```
 
-The command parses and validates the complete configuration, deduplicates regex rules by exact pattern and emoji aliases by identity, preserves the other settings, and atomically writes properly formatted JSON. After a successful change it restarts the service so the saved rules and running process cannot diverge. Regex deletion matches the exact regex string. Quote values that contain spaces or shell metacharacters.
+Plain words and phrases are folded to their canonical form and kept together in the single `blocked words` pattern. Named regex rules remain separate. Common ASCII substitutions such as `@` or `4` for `a`, `1` for `l`, and Unicode confusables are handled by the matcher, so they do not need separate rules.
+
+The command parses and validates the complete configuration, normalizes and deduplicates regex and emoji rules, preserves the other settings, and atomically writes properly formatted JSON. Startup performs the same normalization, so restarting also repairs an older split rule list. After a successful command it restarts the service so the saved rules and running process cannot diverge. Quote values that contain spaces or shell metacharacters.
 
 Emoji rules also remove matching reactions as they are added. Discord sends reaction events over the existing gateway connection, and the bot removes all reactions with that emoji from only the affected message. It does not poll or scan channel history, so reactions on untouched old messages remain until someone adds that emoji to the message again.
 

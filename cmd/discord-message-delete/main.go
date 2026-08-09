@@ -28,7 +28,7 @@ type cleanerStore struct {
 const discordAttachmentFlagSpoiler discordgo.MessageAttachmentFlags = 1 << 3
 
 const serviceName = "discord-message-delete.service"
-const serviceUsage = "usage: discord-message-delete {start|stop|restart|reload|status|enable|disable|logs}\n       discord-message-delete rule {add|delete} <regex>\n       discord-message-delete rule {add|delete} emoji <emoji>"
+const serviceUsage = "usage: discord-message-delete {start|stop|restart|reload|status|enable|disable|logs}\n       discord-message-delete rule {add|delete} <word-or-regex>\n       discord-message-delete rule {add|delete} emoji <emoji>"
 
 type ruleCommand struct {
 	action string
@@ -223,7 +223,7 @@ func parseRuleCommand(args []string) (ruleCommand, error) {
 	if len(args) == 3 && (args[0] == "add" || args[0] == "delete") && args[1] == "emoji" && args[2] != "" {
 		return ruleCommand{action: args[0], kind: "emoji", value: args[2]}, nil
 	}
-	return ruleCommand{}, errors.New("usage: discord-message-delete rule {add|delete} <regex>\n       discord-message-delete rule {add|delete} emoji <emoji>")
+	return ruleCommand{}, errors.New("usage: discord-message-delete rule {add|delete} <word-or-regex>\n       discord-message-delete rule {add|delete} emoji <emoji>")
 }
 
 func activeConfigPath() (string, error) {
@@ -276,6 +276,9 @@ func serviceCommand(args []string) (string, []string, bool, error) {
 }
 
 func loadCleaner(configPath string) (*bot.Cleaner, error) {
+	if _, err := bot.NormalizeConfig(configPath); err != nil {
+		return nil, err
+	}
 	config, err := bot.LoadConfig(configPath)
 	if err != nil {
 		return nil, err
@@ -416,7 +419,7 @@ func handleReaction(
 		return
 	}
 	apiName := reaction.Emoji.APIName()
-	if apiName == "" {
+	if apiName == "" || reaction.Emoji.ID != "" && reaction.Emoji.Name == "" {
 		logger.Printf("reaction remove skipped rules_loaded=%d reason=missing_emoji_name", decision.RulesLoaded)
 		return
 	}

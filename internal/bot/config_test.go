@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestAddRegexRulePreservesConfigAndAppendsRule(t *testing.T) {
+func TestAddRegexRulePreservesConfigAndAddsToBlockedWords(t *testing.T) {
 	path := writeTestConfig(t, `{
   "spoiler_image_user_id": "target-user",
   "ignored_user_ids": ["ignored-user"],
@@ -32,12 +32,12 @@ func TestAddRegexRulePreservesConfigAndAppendsRule(t *testing.T) {
 	if len(config.IgnoredUserIDs) != 1 || config.IgnoredUserIDs[0] != "ignored-user" {
 		t.Fatalf("IgnoredUserIDs = %q, want [ignored-user]", config.IgnoredUserIDs)
 	}
-	if len(config.MessageRegexes) != 2 {
-		t.Fatalf("len(MessageRegexes) = %d, want 2", len(config.MessageRegexes))
+	if len(config.MessageRegexes) != 1 {
+		t.Fatalf("len(MessageRegexes) = %d, want 1", len(config.MessageRegexes))
 	}
-	addedRule := config.MessageRegexes[1]
-	if addedRule.Name != "example" || addedRule.Pattern != "example" {
-		t.Fatalf("added rule = %+v, want name and pattern example", addedRule)
+	blockedWords := config.MessageRegexes[0]
+	if blockedWords.Name != "blocked words" || blockedWords.Pattern != `(?i)\b(?:existing|example)\b` {
+		t.Fatalf("blocked words rule = %+v", blockedWords)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -70,8 +70,11 @@ func TestAddRegexRuleDeduplicatesRepeatedAdds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readConfig after repeated adds: %v", err)
 	}
-	if len(config.MessageRegexes) != 3 {
-		t.Fatalf("len(MessageRegexes) = %d, want 3", len(config.MessageRegexes))
+	if len(config.MessageRegexes) != 1 {
+		t.Fatalf("len(MessageRegexes) = %d, want 1", len(config.MessageRegexes))
+	}
+	if config.MessageRegexes[0].Pattern != `(?i)\b(?:first|second|third)\b` {
+		t.Fatalf("blocked words pattern = %q", config.MessageRegexes[0].Pattern)
 	}
 	if _, err := CompileConfig(config); err != nil {
 		t.Fatalf("CompileConfig after repeated adds: %v", err)
@@ -102,13 +105,13 @@ func TestAddRegexRuleRejectsInvalidPatternWithoutChangingConfig(t *testing.T) {
 	}
 }
 
-func TestAddRegexRuleNormalizesExistingDuplicates(t *testing.T) {
+func TestAddRegexRuleNormalizesExistingWordsIntoOneRule(t *testing.T) {
 	path := writeTestConfig(t, `{
   "spoiler_image_user_id": "",
   "ignored_user_ids": [],
   "message_regexes": [
-    {"name": "first name", "pattern": "same"},
-    {"name": "duplicate name", "pattern": "same"},
+    {"name": "same", "pattern": "same"},
+    {"name": "same", "pattern": "same"},
     {"name": "other", "pattern": "other"}
   ]
 }
@@ -125,11 +128,11 @@ func TestAddRegexRuleNormalizesExistingDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readConfig: %v", err)
 	}
-	if len(config.MessageRegexes) != 2 {
-		t.Fatalf("len(MessageRegexes) = %d, want 2", len(config.MessageRegexes))
+	if len(config.MessageRegexes) != 1 {
+		t.Fatalf("len(MessageRegexes) = %d, want 1", len(config.MessageRegexes))
 	}
-	if config.MessageRegexes[0].Name != "first name" {
-		t.Fatalf("first rule name = %q, want first name", config.MessageRegexes[0].Name)
+	if config.MessageRegexes[0].Pattern != `(?i)\b(?:same|other)\b` {
+		t.Fatalf("blocked words pattern = %q", config.MessageRegexes[0].Pattern)
 	}
 }
 
@@ -140,8 +143,8 @@ func TestRemoveRegexRuleRemovesEveryMatchAndDeduplicatesRemainingRules(t *testin
   "message_regexes": [
     {"name": "remove", "pattern": "remove"},
     {"name": "keep", "pattern": "keep"},
-    {"name": "remove again", "pattern": "remove"},
-    {"name": "keep again", "pattern": "keep"}
+    {"name": "remove", "pattern": "remove"},
+    {"name": "keep", "pattern": "keep"}
   ]
 }
 `)
@@ -157,8 +160,129 @@ func TestRemoveRegexRuleRemovesEveryMatchAndDeduplicatesRemainingRules(t *testin
 	if err != nil {
 		t.Fatalf("readConfig: %v", err)
 	}
-	if len(config.MessageRegexes) != 1 || config.MessageRegexes[0].Pattern != "keep" {
-		t.Fatalf("MessageRegexes = %+v, want one keep rule", config.MessageRegexes)
+	if len(config.MessageRegexes) != 1 || config.MessageRegexes[0].Pattern != `(?i)\b(?:keep)\b` {
+		t.Fatalf("MessageRegexes = %+v, want one blocked words rule", config.MessageRegexes)
+	}
+}
+
+func TestNormalizeConfigCollapsesConfusableWordsAndPreservesNamedRegexes(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [
+    {"name": "blocked words", "pattern": "(?i)\\b(?:marble)\\b"},
+    {"name": "m@rble", "pattern": "m@rble"},
+    {"name": "m4rble", "pattern": "m4rble"},
+    {"name": "marb1e", "pattern": "marb1e"},
+    {"name": "invite links", "pattern": "discord\\.example/[a-z0-9]+"}
+  ]
+}
+`)
+
+	changed, err := NormalizeConfig(path)
+	if err != nil {
+		t.Fatalf("NormalizeConfig: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	want := []RegexRuleConfig{
+		{Name: "blocked words", Pattern: `(?i)\b(?:marble)\b`},
+		{Name: "invite links", Pattern: `discord\.example/[a-z0-9]+`},
+	}
+	if len(config.MessageRegexes) != len(want) {
+		t.Fatalf("MessageRegexes = %+v, want %+v", config.MessageRegexes, want)
+	}
+	for index := range want {
+		if config.MessageRegexes[index] != want[index] {
+			t.Fatalf("MessageRegexes[%d] = %+v, want %+v", index, config.MessageRegexes[index], want[index])
+		}
+	}
+	changed, err = NormalizeConfig(path)
+	if err != nil {
+		t.Fatalf("NormalizeConfig second pass: %v", err)
+	}
+	if changed {
+		t.Fatal("second normalization changed an already canonical config")
+	}
+}
+
+func TestNormalizeConfigParsesGroupedWordsAndCharacterClasses(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [
+    {"name": "blocked words", "pattern": "(?i)\\b(m[a@4]rble|cobalt)\\b"}
+  ]
+}
+`)
+
+	changed, err := NormalizeConfig(path)
+	if err != nil {
+		t.Fatalf("NormalizeConfig: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	want := `(?i)\b(?:marble|cobalt)\b`
+	if len(config.MessageRegexes) != 1 || config.MessageRegexes[0].Pattern != want {
+		t.Fatalf("MessageRegexes = %+v, want pattern %q", config.MessageRegexes, want)
+	}
+}
+
+func TestNormalizeConfigPreservesCustomBlockedWordsRegex(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [
+    {"name": "blocked words", "pattern": "prefix.+suffix"}
+  ]
+}
+`)
+
+	changed, err := NormalizeConfig(path)
+	if err != nil {
+		t.Fatalf("NormalizeConfig: %v", err)
+	}
+	if changed {
+		t.Fatal("custom regex was changed")
+	}
+}
+
+func TestNormalizeConfigKeepsOneCustomBlockedWordsRuleWithoutSemanticDuplicates(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [
+    {"name": "blocked words", "pattern": "(?i)\\bmarble(?:s)?\\b"},
+    {"name": "m@rble", "pattern": "m@rble"},
+    {"name": "cobalt", "pattern": "cobalt"}
+  ]
+}
+`)
+
+	changed, err := NormalizeConfig(path)
+	if err != nil {
+		t.Fatalf("NormalizeConfig: %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	want := `(?:(?i)\bmarble(?:s)?\b)|(?:\b(?:cobalt)\b)`
+	if len(config.MessageRegexes) != 1 || config.MessageRegexes[0].Name != blockedWordsRuleName || config.MessageRegexes[0].Pattern != want {
+		t.Fatalf("MessageRegexes = %+v, want one pattern %q", config.MessageRegexes, want)
 	}
 }
 
@@ -183,6 +307,45 @@ func TestRemoveRegexRuleLeavesConfigUnchangedWhenRuleIsMissing(t *testing.T) {
 	}
 	if string(after) != string(original) {
 		t.Fatal("missing removal changed config")
+	}
+}
+
+func TestRemoveRegexRuleDeletesLiteralFromCombinedBlockedWordsPattern(t *testing.T) {
+	path := writeTestConfig(t, `{
+  "spoiler_image_user_id": "",
+  "ignored_user_ids": [],
+  "message_regexes": [
+    {"name": "blocked words", "pattern": "(?:(?i)\\b(?:marble|marbles)\\b)|(?:\\b(?:cobalt)\\b)"}
+  ]
+}
+`)
+
+	removed, err := RemoveRegexRule(path, "marbles")
+	if err != nil {
+		t.Fatalf("RemoveRegexRule: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	config, err := readConfig(path)
+	if err != nil {
+		t.Fatalf("readConfig: %v", err)
+	}
+	if len(config.MessageRegexes) != 1 || config.MessageRegexes[0].Name != blockedWordsRuleName {
+		t.Fatalf("MessageRegexes = %+v, want one blocked words rule", config.MessageRegexes)
+	}
+	compiled, err := CompileConfig(config)
+	if err != nil {
+		t.Fatalf("CompileConfig: %v", err)
+	}
+	cleaner := NewCleaner(compiled)
+	if cleaner.Decide(Message{Content: "marbles"}).Delete {
+		t.Fatal("deleted word still matches")
+	}
+	for _, content := range []string{"marble", "cobalt"} {
+		if !cleaner.Decide(Message{Content: content}).Delete {
+			t.Fatalf("remaining word %q no longer matches", content)
+		}
 	}
 }
 

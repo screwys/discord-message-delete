@@ -140,6 +140,19 @@ func TestMessageRegexesMatchUnicodeConfusables(t *testing.T) {
 	}
 }
 
+func TestMessageRegexesMatchCommonASCIIConfusables(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{
+		MessageRegexes: []RegexRuleConfig{{Name: "blocked term", Pattern: `\bmarble\b`}},
+	})
+
+	for _, content := range []string{"m@rble", "m4rble", "marb1e"} {
+		decision := cleaner.Decide(Message{AuthorID: "member", Content: content})
+		if !decision.Delete {
+			t.Fatalf("Delete = false for neutral confusable fixture %q", content)
+		}
+	}
+}
+
 func TestMessageRegexesIgnoreInvisibleFormatting(t *testing.T) {
 	cleaner := newTestCleaner(t, Config{
 		MessageRegexes: []RegexRuleConfig{{Name: "blocked term", Pattern: `(?i)\bexample\b`}},
@@ -264,6 +277,24 @@ func TestEmojiRuleDoesNotMatchDifferentEmoji(t *testing.T) {
 	decision := cleaner.Decide(Message{AuthorID: "member", Content: "not this one 👎"})
 	if decision.Delete {
 		t.Fatalf("Delete = true, want false")
+	}
+}
+
+func TestEmojiRuleDoesNotMatchDifferentSkinTone(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{EmojiRules: []string{":thumbsup:"}})
+
+	decision := cleaner.Decide(Message{AuthorID: "member", Content: "different emoji 👍🏽"})
+	if decision.Delete {
+		t.Fatalf("Delete = true, want false")
+	}
+}
+
+func TestEmojiRuleMatchesConfiguredSkinTone(t *testing.T) {
+	cleaner := newTestCleaner(t, Config{EmojiRules: []string{":thumbsup_tone3:"}})
+
+	decision := cleaner.Decide(Message{AuthorID: "member", Content: "matching emoji 👍🏽"})
+	if !decision.Delete || decision.Kind != DecisionEmoji {
+		t.Fatalf("decision = %+v, want emoji deletion", decision)
 	}
 }
 

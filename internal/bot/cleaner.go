@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/mtibben/confusables"
 )
@@ -185,7 +186,7 @@ func (cleaner *Cleaner) DecideReaction(reaction ReactionEmoji) ReactionDecision 
 
 func (rule EmojiRule) matchesText(text string) bool {
 	if rule.Unicode != "" {
-		return strings.Contains(text, rule.Unicode)
+		return containsExactEmoji(text, rule.Unicode)
 	}
 	for _, match := range customEmojiInTextPattern.FindAllStringSubmatch(text, -1) {
 		if len(match) > 2 && match[2] == rule.CustomID {
@@ -193,6 +194,40 @@ func (rule EmojiRule) matchesText(text string) bool {
 		}
 	}
 	return false
+}
+
+func containsExactEmoji(text string, emoji string) bool {
+	for offset := 0; offset < len(text); {
+		relative := strings.Index(text[offset:], emoji)
+		if relative < 0 {
+			return false
+		}
+		start := offset + relative
+		end := start + len(emoji)
+		joinedBefore := false
+		if start > 0 {
+			previous, _ := utf8.DecodeLastRuneInString(text[:start])
+			joinedBefore = previous == '\u200d'
+		}
+		joinedAfter := false
+		if end < len(text) {
+			next, _ := utf8.DecodeRuneInString(text[end:])
+			joinedAfter = next == '\u200d' || isVariationSelector(next) || isEmojiModifier(next)
+		}
+		if !joinedBefore && !joinedAfter {
+			return true
+		}
+		offset = end
+	}
+	return false
+}
+
+func isVariationSelector(char rune) bool {
+	return char >= '\ufe00' && char <= '\ufe0f' || char >= '\U000e0100' && char <= '\U000e01ef'
+}
+
+func isEmojiModifier(char rune) bool {
+	return char >= '\U0001f3fb' && char <= '\U0001f3ff'
 }
 
 func (rule EmojiRule) matchesReaction(reaction ReactionEmoji) bool {
@@ -234,21 +269,14 @@ func messageSearchText(message Message) string {
 }
 
 func foldConfusableText(value string) string {
-	needsFolding := false
-	for _, char := range value {
-		if char > unicode.MaxASCII || isDefaultIgnorable(char) {
-			needsFolding = true
-			break
-		}
-	}
-	if !needsFolding {
-		return value
-	}
-
 	var builder strings.Builder
 	builder.Grow(len(value))
 	for _, char := range value {
 		if isDefaultIgnorable(char) {
+			continue
+		}
+		if replacement, replaced := asciiConfusable(char); replaced {
+			builder.WriteRune(replacement)
 			continue
 		}
 		if char <= unicode.MaxASCII {
@@ -258,6 +286,27 @@ func foldConfusableText(value string) string {
 		builder.WriteString(confusables.Skeleton(string(char)))
 	}
 	return builder.String()
+}
+
+func asciiConfusable(char rune) (rune, bool) {
+	switch char {
+	case '@', '4':
+		return 'a', true
+	case '3':
+		return 'e', true
+	case '1', '|':
+		return 'l', true
+	case '5', '$':
+		return 's', true
+	case '7':
+		return 't', true
+	case '8':
+		return 'b', true
+	case '0':
+		return 'o', true
+	default:
+		return 0, false
+	}
 }
 
 func isDefaultIgnorable(char rune) bool {
