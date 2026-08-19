@@ -71,8 +71,6 @@ Start it:
 discord-message-delete status
 ```
 
-The start script disables and removes the former `spoiler-cleaner.service` unit if it is still installed, preventing both names from running at once.
-
 When the service starts, it creates `~/.local/bin/discord-message-delete` as a link to the built binary. Most Linux desktop sessions include `~/.local/bin` in `PATH`. If yours does not, add that directory to your shell's `PATH` once; a service cannot change the environment of an already-running shell.
 
 The command accepts `start`, `stop`, `restart`, `reload`, `status`, `enable`, `disable`, and `logs`. For example:
